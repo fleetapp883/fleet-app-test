@@ -1,0 +1,2 @@
+# Ignore Firebase config
+src/firebase.js
