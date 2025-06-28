@@ -1,5 +1,10 @@
 import React, { useState } from "react";
-import { collection, addDoc } from "firebase/firestore";
+import {
+  collection,
+  addDoc,
+  doc,
+  runTransaction
+} from "firebase/firestore";
 import { db, auth } from "../firebase";
 
 const initialForm = {
@@ -65,38 +70,62 @@ const initialForm = {
 
 const ManualEntryForm = ({ onAddRow }) => {
   const [formData, setFormData] = useState(initialForm);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
 
   const handleChange = (e) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
   };
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
+  const getNextFleetNumber = async () => {
+    const counterRef = doc(db, "Counters", "fleet_counter");
 
-    try {
-      const user = auth.currentUser;
+    const newFleetNo = await runTransaction(db, async (transaction) => {
+      const docSnap = await transaction.get(counterRef);
+      if (!docSnap.exists()) {
+        throw new Error("Counter document does not exist.");
+      }
 
-      const uniqueNo = `UNQ-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
-      const enrichedData = {
-        ...formData,
-        UniqueNo: uniqueNo,
-        createdAt: new Date(),
-        createdBy: user?.email || "anonymous",
-        isCurrent: true,
-        versionDate: new Date()
-      };
+      const current = docSnap.data().nextFleetNo || 1;
+      transaction.update(counterRef, { nextFleetNo: current + 1 });
+      return current;
+    });
 
-      await addDoc(collection(db, "fleet_records"), enrichedData);
-      onAddRow(enrichedData);
-      setFormData(initialForm);
-
-      // ✅ Clipboard copy + alert
-      await navigator.clipboard.writeText(uniqueNo);
-      alert(`✅ Row saved!\nUniqueNo copied: ${uniqueNo}`);
-    } catch (err) {
-      alert("❌ Error saving row: " + err.message);
-    }
+    return newFleetNo;
   };
+
+  const handleSubmit = async (e) => {
+  e.preventDefault();
+  if (isSubmitting) return;
+
+  setIsSubmitting(true);
+
+  try {
+    const user = auth.currentUser;
+    const fleetNumber = await getNextFleetNumber();
+
+    const enrichedData = {
+      ...formData,
+      fleetNumber,
+      createdAt: new Date(),
+      createdBy: user?.email || "anonymous",
+      isCurrent: true,
+      versionDate: new Date()
+    };
+
+    const docRef = await addDoc(collection(db, "fleet_records"), enrichedData);
+    onAddRow({ id: docRef.id, ...enrichedData });
+
+    setFormData(initialForm);
+
+    await navigator.clipboard.writeText(String(fleetNumber));
+    alert(`✅ Row saved!\nFleet Number copied: ${fleetNumber}`);
+  } catch (err) {
+    alert("❌ Error saving row: " + err.message);
+  } finally {
+    setIsSubmitting(false);
+  }
+};
 
   return (
     <div style={{ marginTop: 20 }}>
@@ -114,7 +143,10 @@ const ManualEntryForm = ({ onAddRow }) => {
           />
         ))}
         <br />
-        <button type="submit">Add Row</button>
+        <button type="submit" disabled={isSubmitting}>
+  {isSubmitting ? "Saving..." : "Add Row"}
+</button>
+
       </form>
     </div>
   );

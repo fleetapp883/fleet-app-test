@@ -17,6 +17,7 @@ import ManualEntryForm from "./components/ManualEntryForm";
 import "./App.css";
 
 const labelToKey = {
+  "Fleet Number": "fleetNumber",
   "Indent No": "IndentNo", "Indent Date": "IndentDate", "Placement Date": "PlacementDate",
   "Customer": "Customer", "Customer Type": "CustomerType", "Customer Billing Type": "CustomerBillingType",
   "Sourcing (Vendor)": "SourcingVendor", "Vendor Type": "VendorType", "Vendor Billing Type": "VendorBillingType",
@@ -39,17 +40,18 @@ const labelToKey = {
   "POD Rec Date": "PODRecDate", "POD Send to Customer Date": "PODSendToCustomerDate",
   "POD Docket No.": "PODDocketNo", "POD Rec By Customer": "PODRecByCustomer", "POD Deduction If any": "PODDeductionIfAny",
   "Gross Profit": "GrossProfit", "Bad Debts": "BadDebts", "Net Profit": "NetProfit",
-  "UniqueNo": "UniqueNo", "isCurrent": "isCurrent", "createdBy": "createdBy", "createdAt": "createdAt"
+  "isCurrent": "isCurrent", "createdBy": "createdBy", "createdAt": "createdAt"
 };
 
 const keyToLabel = Object.fromEntries(Object.entries(labelToKey).map(([k, v]) => [v, k]));
+
 
 function App() {
   const [user, setUser] = useState(null);
   const [records, setRecords] = useState([]);
   const [history, setHistory] = useState([]);
   const [searchKey, setSearchKey] = useState("");
-  const [searchField, setSearchField] = useState("UniqueNo");
+  const [searchField, setSearchField] = useState("fleetNumber");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
 
@@ -91,8 +93,9 @@ const handleSearch = async () => {
       const toDate = new Date(endDate + "T23:59:59");
       q = query(fleetRef, where("createdAt", ">=", fromDate), where("createdAt", "<=", toDate));
     } else if (searchKey) {
-      q = query(fleetRef, where(searchField, "==", searchKey));
-    } else {
+  const key = searchField === "fleetNumber" ? Number(searchKey) : searchKey;
+  q = query(fleetRef, where(searchField, "==", key));
+  }  else {
       q = query(fleetRef);
     }
 
@@ -107,7 +110,7 @@ const handleSearch = async () => {
     });
 
     setHistory(allVersions);
-    setRecords(searchField === "UniqueNo" || searchField === "Broker" ? currentOnly : []);
+    setRecords(searchField === "fleetNumber" || searchField === "Broker" ? currentOnly : []);
   } catch (error) {
     alert("Search failed: " + error.message);
   }
@@ -115,44 +118,54 @@ const handleSearch = async () => {
 
 
 
-  const handleUpdate = async (row) => {
-    try {
-      const { id, ...rest } = row;
-      const cleanData = {};
-      for (const key in rest) {
-        cleanData[key] =
-          typeof rest[key] === "string" || typeof rest[key] === "number"
-            ? rest[key]
-            : String(rest[key] ?? "");
-      }
-
-      await updateDoc(doc(db, "fleet_records", id), {
-        isCurrent: false,
-        expiredAt: new Date(),
-        modifiedBy: user.email
-      });
-
-      const newVersion = {
-        ...cleanData,
-        createdAt: new Date(),
-        createdBy: user.email,
-        isCurrent: true,
-        versionDate: new Date()
-      };
-
-      const docRef = await addDoc(collection(db, "fleet_records"), newVersion);
-
-      const updatedRecords = records.map((r) =>
-        r.id === id ? { ...newVersion, id: docRef.id } : r
-      );
-      setRecords(updatedRecords);
-      handleSearch();
-
-      alert("✅ Record updated (SCD Type 2)");
-    } catch (error) {
-      alert("❌ Update failed: " + error.message);
+const handleUpdate = async (row) => {
+  try {
+    const { id, fleetNumber, ...rest } = row;
+    const cleanData = {};
+    for (const key in rest) {
+      cleanData[key] =
+        typeof rest[key] === "string" || typeof rest[key] === "number"
+          ? rest[key]
+          : String(rest[key] ?? "");
     }
-  };
+
+    await updateDoc(doc(db, "fleet_records", id), {
+      isCurrent: false,
+      expiredAt: new Date(),
+      modifiedBy: user.email
+    });
+
+    const newVersion = {
+      ...cleanData,
+      fleetNumber,
+      createdAt: new Date(),
+      createdBy: user.email,
+      isCurrent: true,
+      versionDate: new Date()
+    };
+
+    const docRef = await addDoc(collection(db, "fleet_records"), newVersion);
+
+    // ✅ Fetch only updated fleetNumber entries
+    const q = query(collection(db, "fleet_records"), where("fleetNumber", "==", fleetNumber));
+    const snapshot = await getDocs(q);
+    const allVersions = [];
+    const currentOnly = [];
+
+    snapshot.forEach((docSnap) => {
+      const row = { id: docSnap.id, ...docSnap.data() };
+      allVersions.push(row);
+      if (row.isCurrent) currentOnly.push(row);
+    });
+
+    setHistory(allVersions);
+    setRecords(currentOnly);
+
+    alert("✅ Record updated (SCD Type 2)");
+  } catch (error) {
+    alert("❌ Update failed: " + error.message);
+  }
+};
 
   const handleDelete = async (id) => {
     try {
@@ -182,7 +195,7 @@ const handleSearch = async () => {
   setStartDate("");
   setEndDate("");
 }}>
-  <option value="UniqueNo">UniqueNo</option>
+  <option value="fleetNumber">Fleet Number</option>
   <option value="Broker">Broker</option>
   <option value="Date">Date</option>
 </select>
@@ -207,14 +220,14 @@ const handleSearch = async () => {
 <button onClick={handleSearch} style={{ marginLeft: 10 }}>Search</button>
 
       <hr />
-      {searchField === "UniqueNo" && records.length > 0 && (
+      {searchField === "fleetNumber" && records.length > 0 && (
       <>
       <h4>Editable Current Records</h4>
     <div className="table-scroll-x">
       <table>
         <thead>
           <tr>
-            {Object.keys(labelToKey).map((label) => (
+            {["Fleet Number", ...Object.keys(labelToKey).filter(l => l !== "Fleet Number").sort()].map((label) => (
               <th key={label}>{label}</th>
             ))}
             <th>Action</th>
@@ -222,28 +235,33 @@ const handleSearch = async () => {
         </thead>
         <tbody>
           {records.map((row, rowIndex) => {
-            const readOnly = ["UniqueNo", "createdAt", "createdBy", "isCurrent"];
+            const readOnly = ["fleetNumber", "createdAt", "createdBy", "isCurrent"];
             return (
               <tr key={rowIndex}>
-                {Object.entries(labelToKey).map(([label, key]) => (
-                  <td key={key}>
-                    <input
-                      type="text"
-                      value={
-                        typeof row[key] === "object" && row[key]?.seconds
-                          ? new Date(row[key].seconds * 1000).toLocaleString()
-                          : String(row[key] ?? "")
-                      }
-                      onChange={(e) => {
-                        const updated = [...records];
-                        updated[rowIndex][key] = e.target.value;
-                        setRecords(updated);
-                      }}
-                      readOnly={readOnly.includes(key)}
-                      style={{ width: "120px" }}
-                    />
-                  </td>
-                ))}
+                {["Fleet Number", ...Object.keys(labelToKey).filter(l => l !== "Fleet Number").sort()].map((label) => {
+  const key = labelToKey[label];
+  return (
+    <td key={key}>
+      <input
+        type="text"
+        value={
+          typeof row[key] === "object" && row[key]?.seconds
+            ? new Date(row[key].seconds * 1000).toLocaleString()
+            : String(row[key] ?? "")
+        }
+        onChange={(e) => {
+          const updated = [...records];
+          updated[rowIndex][key] = e.target.value;
+          setRecords(updated);
+        }}
+        readOnly={["fleetNumber", "createdAt", "createdBy", "isCurrent"].includes(key)}
+        style={{ width: "120px" }}
+      />
+    </td>
+  );
+})}
+
+                
                 <td>
                   <button onClick={() => handleUpdate(row)}>Save</button>
                   <button
@@ -273,7 +291,9 @@ const handleSearch = async () => {
             <table>
               <thead>
                 <tr>
-                  {[...new Set(history.flatMap(Object.keys))].map((col) => (
+                  {["fleetNumber", ...[...new Set(history.flatMap(Object.keys))]
+                      .filter(col => col !== "fleetNumber")
+                    .sort()].map((col) => (
                     <th key={col}>{col}</th>
                   ))}
                 </tr>
@@ -289,13 +309,16 @@ const handleSearch = async () => {
                   })
                   .map((row, i) => (
                     <tr key={i}>
-                      {[...new Set(history.flatMap(Object.keys))].map((col, j) => (
-                        <td key={j}>
-                          {typeof row[col] === "object" && row[col]?.seconds
-                            ? new Date(row[col].seconds * 1000).toLocaleString()
-                            : String(row[col] ?? "")}
-                        </td>
-                      ))}
+                      {["fleetNumber", ...[...new Set(history.flatMap(Object.keys))]
+  .filter(col => col !== "fleetNumber")
+  .sort()].map((col, j) => (
+    <td key={j}>
+      {typeof row[col] === "object" && row[col]?.seconds
+        ? new Date(row[col].seconds * 1000).toLocaleString()
+        : String(row[col] ?? "")}
+    </td>
+))}
+
                     </tr>
                   ))}
               </tbody>
