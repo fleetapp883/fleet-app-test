@@ -205,11 +205,25 @@ const handleUpdate = async (row) => {
   if (!user) return <Auth />;
 
   return (
-    <div style={{ padding: 20 }}>
-      <h2>Welcome, {user.email}</h2>
+    
+<div style={{ maxWidth: "100vw", overflowX: "hidden", padding: "40px 20px" }}>
+  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+    <h2 style={{ margin: 0 }}>Welcome, {user.email}</h2>
+    <div style={{
+      backgroundColor: "#1e1e1e", // Dark gray
+      padding: "6px 12px",
+      borderRadius: "8px",
+      display: "inline-block"
+    }}>
+      <img src="/logo.png" alt="Axle Logo" style={{ height: "50px" }} />
+    </div>
+
+  </div>
+
+
       <button onClick={() => signOut(auth)}>Logout</button>
       <hr />
-      <UploadForm onDataParsed={(data) => setRecords([...records, ...data])} />
+      <UploadForm />
       <ManualEntryForm onAddRow={(row) => setRecords([row])} />
 
       <hr />

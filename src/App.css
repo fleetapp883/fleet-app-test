@@ -7,14 +7,31 @@ body {
   color: #333;
 }
 
+html, body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+}
+
+body {
+  overflow-x: hidden; /* ⛔ Prevent horizontal scroll */
+}
+
+.table-scroll-x {
+  overflow-x: auto;
+  width: 100%;
+}
+
+
 .container {
   max-width: 1200px;
   margin: auto;
-  padding: 20px 40px;
+  padding: 10px 20px; /* ✅ Reduced horizontal padding */
   background: #fff;
   border-radius: 12px;
   box-shadow: 0 0 10px rgba(0, 0, 0, 0.05);
 }
+
 
 .header {
   display: flex;
