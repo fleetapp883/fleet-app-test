@@ -6,6 +6,7 @@ import {
   query,
   where,
   getDocs,
+  getDoc,
   updateDoc,
   deleteDoc,
   doc
@@ -40,7 +41,7 @@ const labelToKey = {
   "POD Rec Date": "PODRecDate", "POD Send to Customer Date": "PODSendToCustomerDate",
   "POD Docket No.": "PODDocketNo", "POD Rec By Customer": "PODRecByCustomer", "POD Deduction If any": "PODDeductionIfAny",
   "Gross Profit": "GrossProfit", "Bad Debts": "BadDebts", "Net Profit": "NetProfit",
-  "isCurrent": "isCurrent", "createdBy": "createdBy", "createdAt": "createdAt"
+  "isCurrent": "isCurrent", "createdBy": "createdBy", "createdAt": "createdAt", "Update Description": "updateDescription"
 };
 
 const keyToLabel = Object.fromEntries(Object.entries(labelToKey).map(([k, v]) => [v, k]));
@@ -120,14 +121,36 @@ const handleSearch = async () => {
 
 const handleUpdate = async (row) => {
   try {
-    const { id, fleetNumber, ...rest } = row;
+    const { id, fleetNumber, ...updatedData } = row;
+
+    // Fetch the current doc before marking it expired
+    const currentDocSnap = await getDocs(
+      query(collection(db, "fleet_records"), where("fleetNumber", "==", fleetNumber), where("isCurrent", "==", true))
+    );
+    const oldData = currentDocSnap.docs.find(doc => doc.id === id)?.data() || {};
+
     const cleanData = {};
-    for (const key in rest) {
-      cleanData[key] =
-        typeof rest[key] === "string" || typeof rest[key] === "number"
-          ? rest[key]
-          : String(rest[key] ?? "");
+    const updateLog = [];
+
+    for (const key in updatedData) {
+      // Skip system/meta fields
+      if (["id", "isCurrent", "createdAt", "createdBy", "versionDate", "updateDescription", "expiredAt", "modifiedBy"].includes(key)) {
+        continue;
+      }
+
+      const newValue = updatedData[key];
+      const oldValue = oldData[key];
+
+      cleanData[key] = typeof newValue === "string" || typeof newValue === "number"
+        ? newValue
+        : String(newValue ?? "");
+
+      if (newValue !== oldValue && keyToLabel[key]) {
+        updateLog.push(`Updated ${keyToLabel[key]}`);
+      }
     }
+
+    const updateDescription = updateLog.join(", ");
 
     await updateDoc(doc(db, "fleet_records", id), {
       isCurrent: false,
@@ -141,12 +164,12 @@ const handleUpdate = async (row) => {
       createdAt: new Date(),
       createdBy: user.email,
       isCurrent: true,
-      versionDate: new Date()
+      versionDate: new Date(),
+      updateDescription
     };
 
     const docRef = await addDoc(collection(db, "fleet_records"), newVersion);
 
-    // ✅ Fetch only updated fleetNumber entries
     const q = query(collection(db, "fleet_records"), where("fleetNumber", "==", fleetNumber));
     const snapshot = await getDocs(q);
     const allVersions = [];
@@ -166,6 +189,8 @@ const handleUpdate = async (row) => {
     alert("❌ Update failed: " + error.message);
   }
 };
+
+
 
   const handleDelete = async (id) => {
     try {
@@ -235,7 +260,7 @@ const handleUpdate = async (row) => {
         </thead>
         <tbody>
           {records.map((row, rowIndex) => {
-            const readOnly = ["fleetNumber", "createdAt", "createdBy", "isCurrent"];
+            const readOnly = ["fleetNumber", "createdAt", "createdBy", "isCurrent", "updateDescription"];
             return (
               <tr key={rowIndex}>
                 {["Fleet Number", ...Object.keys(labelToKey).filter(l => l !== "Fleet Number").sort()].map((label) => {
