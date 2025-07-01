@@ -144,7 +144,11 @@ const ManualEntryForm = ({ onAddRow }) => {
         ))}
         <br />
         <button type="submit" disabled={isSubmitting}>
-  {isSubmitting ? "Saving..." : "Add Row"}
+  {isSubmitting ? (
+    <>
+      Saving... <span className="loader-spinner" />
+    </>
+  ) : "Add Row"}
 </button>
 
       </form>

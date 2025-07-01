@@ -207,18 +207,14 @@ const handleUpdate = async (row) => {
   return (
     
 <div style={{ maxWidth: "100vw", overflowX: "hidden", padding: "40px 20px" }}>
-  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
-    <h2 style={{ margin: 0 }}>Welcome, {user.email}</h2>
-    <div style={{
-      backgroundColor: "#1e1e1e", // Dark gray
-      padding: "6px 12px",
-      borderRadius: "8px",
-      display: "inline-block"
-    }}>
-      <img src="/logo.png" alt="Axle Logo" style={{ height: "50px" }} />
-    </div>
-
+  <div className="header">
+  <h2>Fleet Billing Dashboard</h2>
+  <div style={{ display: "flex", alignItems: "center" }}>
+    <span className="user-email">Welcome, {user.email}</span>
+    <img src="/logo.png" alt="Logo" style={{ height: "50px" }} />
   </div>
+</div>
+
 
 
       <button onClick={() => signOut(auth)}>Logout</button>
@@ -228,6 +224,7 @@ const handleUpdate = async (row) => {
 
       <hr />
      <h4>Search Existing Records</h4>
+     <div className="search-bar">
 <select value={searchField} onChange={(e) => {
   setSearchField(e.target.value);
   setSearchKey("");
@@ -257,6 +254,7 @@ const handleUpdate = async (row) => {
 )}
 
 <button onClick={handleSearch} style={{ marginLeft: 10 }}>Search</button>
+</div>
 
       <hr />
       {searchField === "fleetNumber" && records.length > 0 && (
@@ -293,7 +291,7 @@ const handleUpdate = async (row) => {
           updated[rowIndex][key] = e.target.value;
           setRecords(updated);
         }}
-        readOnly={["fleetNumber", "createdAt", "createdBy", "isCurrent"].includes(key)}
+        readOnly={["fleetNumber", "createdAt", "createdBy", "isCurrent","updateDescription"].includes(key)}
         style={{ width: "120px" }}
       />
     </td>
@@ -302,15 +300,16 @@ const handleUpdate = async (row) => {
 
                 
                 <td>
-                  <button onClick={() => handleUpdate(row)}>Save</button>
-                  <button
-                    onClick={() => {
-                      if (window.confirm("Delete this row?")) handleDelete(row.id);
-                    }}
-                    style={{ color: "red", marginLeft: 8 }}
-                  >
-                    Delete
-                  </button>
+                 <button onClick={() => handleUpdate(row)}>Save</button>
+<button
+  className="delete"
+  onClick={() => {
+    if (window.confirm("Delete this row?")) handleDelete(row.id);
+  }}
+>
+  Delete
+</button>
+
                 </td>
               </tr>
             );
@@ -365,6 +364,10 @@ const handleUpdate = async (row) => {
           </div>
         </>
       )}
+      <p style={{ textAlign: "center", marginTop: "30px", color: "#666" }}>
+  © 2025 Fleet Billing System
+</p>
+
     </div>
   );
 }
