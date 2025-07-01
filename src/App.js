@@ -16,6 +16,11 @@ import Auth from "./components/Auth";
 import UploadForm from "./components/UploadForm";
 import ManualEntryForm from "./components/ManualEntryForm";
 import "./App.css";
+import { toast, ToastContainer } from "react-toastify";
+import "react-toastify/dist/ReactToastify.css";
+
+
+
 
 const labelToKey = {
   "Fleet Number": "fleetNumber",
@@ -55,6 +60,12 @@ function App() {
   const [searchField, setSearchField] = useState("fleetNumber");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
+  const [originalRecords, setOriginalRecords] = useState({});
+  const [isSearching, setIsSearching] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
+
+
+
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
@@ -63,41 +74,88 @@ function App() {
     return () => unsubscribe();
   }, []);
 
-  const handleExport = () => {
-    import("xlsx").then((xlsx) => {
-      const rows = history.map((row) => {
-        const flatRow = {};
-        Object.keys(row).forEach((k) => {
-          const value = row[k];
-          flatRow[k] =
-            typeof value === "object" && value?.seconds
-              ? new Date(value.seconds * 1000).toLocaleString()
-              : String(value ?? "");
-        });
-        return flatRow;
-      });
+  // const handleExport = () => {
+  //   import("xlsx").then((xlsx) => {
+  //     const rows = history.map((row) => {
+  //       const flatRow = {};
+  //       Object.keys(row).forEach((k) => {
+  //         const value = row[k];
+  //         flatRow[k] =
+  //           typeof value === "object" && value?.seconds
+  //             ? new Date(value.seconds * 1000).toLocaleString()
+  //             : String(value ?? "");
+  //       });
+  //       return flatRow;
+  //     });
 
-      const worksheet = xlsx.utils.json_to_sheet(rows);
-      const workbook = xlsx.utils.book_new();
-      xlsx.utils.book_append_sheet(workbook, worksheet, "History");
-      xlsx.writeFile(workbook, "Fleet_Full_Version_History.xlsx");
+  //     const worksheet = xlsx.utils.json_to_sheet(rows);
+  //     const workbook = xlsx.utils.book_new();
+  //     xlsx.utils.book_append_sheet(workbook, worksheet, "History");
+  //     xlsx.writeFile(workbook, "Fleet_Full_Version_History.xlsx");
+  //   });
+  // };
+const handleExport = () => {
+  setIsExporting(true);
+  toast.info("⏳ Preparing Excel export...");
+
+  import("xlsx").then((xlsx) => {
+    const rows = history.map((row) => {
+      const flatRow = {};
+      Object.keys(row).forEach((k) => {
+        const value = row[k];
+        flatRow[k] =
+          typeof value === "object" && value?.seconds
+            ? new Date(value.seconds * 1000).toLocaleString()
+            : String(value ?? "");
+      });
+      return flatRow;
     });
-  };
+
+    const worksheet = xlsx.utils.json_to_sheet(rows);
+    const workbook = xlsx.utils.book_new();
+    xlsx.utils.book_append_sheet(workbook, worksheet, "History");
+    xlsx.writeFile(workbook, "Fleet_Full_Version_History.xlsx");
+
+    toast.success("✅ Export complete.");
+  }).catch((err) => {
+    toast.error("❌ Export failed: " + err.message);
+  }).finally(() => {
+    setIsExporting(false);
+  });
+};
+
+
 
 const handleSearch = async () => {
+  setIsSearching(true);
   try {
     const fleetRef = collection(db, "fleet_records");
     let q;
 
-    if (searchField === "Date" && startDate && endDate) {
+    if (searchField === "Date") {
+      if (!startDate || !endDate) {
+        toast.warn("📅 Please select both From and To dates.");
+        setIsSearching(false);
+        return;
+      }
+
       const fromDate = new Date(startDate);
       const toDate = new Date(endDate + "T23:59:59");
+
+      if (fromDate > toDate) {
+        toast.warn("⚠️ 'From' date cannot be after 'To' date.");
+        setIsSearching(false);
+        return;
+      }
+
       q = query(fleetRef, where("createdAt", ">=", fromDate), where("createdAt", "<=", toDate));
     } else if (searchKey) {
-  const key = searchField === "fleetNumber" ? Number(searchKey) : searchKey;
-  q = query(fleetRef, where(searchField, "==", key));
-  }  else {
-      q = query(fleetRef);
+      const key = searchField === "fleetNumber" ? Number(searchKey) : searchKey;
+      q = query(fleetRef, where(searchField, "==", key));
+    } else {
+      toast.warn("🔍 Please enter a search value.");
+      setIsSearching(false);
+      return;
     }
 
     const snapshot = await getDocs(q);
@@ -110,45 +168,97 @@ const handleSearch = async () => {
       if (row.isCurrent) currentOnly.push(row);
     });
 
-    setHistory(allVersions);
-    setRecords(searchField === "fleetNumber" || searchField === "Broker" ? currentOnly : []);
+if (searchField === "fleetNumber" || searchField === "Broker") {
+  setRecords(currentOnly);
+  setHistory(allVersions);
+} else if (searchField === "Date") {
+  setRecords([]); // Clear editable
+  setHistory(allVersions);
+}
+
+
+    // 🛑 Show toast if no results found
+    if (snapshot.empty || allVersions.length === 0) {
+      let msg = "❌ No data found.";
+      if (searchField === "Date") {
+        msg = `❌ No data available between ${startDate} and ${endDate}`;
+      } else if (searchField === "fleetNumber") {
+        msg = `❌ No record found for Fleet Number: ${searchKey}`;
+      } else if (searchField === "Broker") {
+        msg = `❌ No record found for Broker: ${searchKey}`;
+      }
+      toast.info(msg);
+    }
+
   } catch (error) {
-    alert("Search failed: " + error.message);
+    toast.error("❌ Search failed: " + error.message);
+  } finally {
+    setIsSearching(false);
   }
 };
 
+
+const ignoredFields = ["versionDate", "expiredAt", "isCurrent", "updateDescription", "createdAt", "createdBy"];
+
+const normalize = (val) => {
+  if (val === null || val === undefined) return "";
+  return typeof val === "object" && val.seconds
+    ? new Date(val.seconds * 1000).toISOString()
+    : String(val).trim();
+};
+
+const getChangedFields = (current, original) => {
+  const changed = [];
+  for (const key in current) {
+    if (ignoredFields.includes(key)) continue;
+    const currVal = normalize(current[key]);
+    const origVal = normalize(original?.[key]);
+    if (currVal !== origVal) changed.push(key);
+  }
+  return changed;
+};
+
+const hasMeaningfulChanges = (curr, orig) => getChangedFields(curr, orig).length > 0;
 
 
 const handleUpdate = async (row) => {
   try {
     const { id, fleetNumber, ...updatedData } = row;
 
-    // Fetch the current doc before marking it expired
     const currentDocSnap = await getDocs(
       query(collection(db, "fleet_records"), where("fleetNumber", "==", fleetNumber), where("isCurrent", "==", true))
     );
-    const oldData = currentDocSnap.docs.find(doc => doc.id === id)?.data() || {};
+    const oldDoc = currentDocSnap.docs.find(doc => doc.id === id);
+    const oldData = oldDoc?.data() || {};
 
     const cleanData = {};
     const updateLog = [];
+    const ignoredFields = ["id", "isCurrent", "createdAt", "createdBy", "versionDate", "updateDescription", "expiredAt", "modifiedBy"];
+
+    let hasChanged = false;
 
     for (const key in updatedData) {
-      // Skip system/meta fields
-      if (["id", "isCurrent", "createdAt", "createdBy", "versionDate", "updateDescription", "expiredAt", "modifiedBy"].includes(key)) {
-        continue;
-      }
+      if (ignoredFields.includes(key)) continue;
 
-      const newValue = updatedData[key];
-      const oldValue = oldData[key];
+      const newVal = updatedData[key] ?? "";
+      const oldVal = oldData[key] ?? "";
 
-      cleanData[key] = typeof newValue === "string" || typeof newValue === "number"
-        ? newValue
-        : String(newValue ?? "");
+      cleanData[key] = newVal;
 
-      if (newValue !== oldValue && keyToLabel[key]) {
+      if (String(newVal).trim() !== String(oldVal).trim() && keyToLabel[key]) {
         updateLog.push(`Updated ${keyToLabel[key]}`);
+        hasChanged = true;
       }
     }
+
+    if (!hasChanged) {
+      toast.info("ℹ️ No changes detected — update skipped.");
+      return;
+    }
+
+    // ✅ Confirmation before updating
+    const confirm = window.confirm(`Are you sure you want to update this record?\nChanges: ${updateLog.join(", ")}`);
+    if (!confirm) return;
 
     const updateDescription = updateLog.join(", ");
 
@@ -184,23 +294,43 @@ const handleUpdate = async (row) => {
     setHistory(allVersions);
     setRecords(currentOnly);
 
-    alert("✅ Record updated (SCD Type 2)");
+    const originalMap = {};
+    currentOnly.forEach((r) => originalMap[r.id] = { ...r });
+    setOriginalRecords(originalMap);
+
+    toast.success("✅ Record updated (SCD Type 2)");
   } catch (error) {
-    alert("❌ Update failed: " + error.message);
+    toast.error("❌ Update failed: " + error.message);
   }
 };
 
 
+const handleDelete = async (fleetNumberToDelete) => {
+  try {
+    const q = query(collection(db, "fleet_records"), where("fleetNumber", "==", fleetNumberToDelete));
+    const snapshot = await getDocs(q);
 
-  const handleDelete = async (id) => {
-    try {
-      await deleteDoc(doc(db, "fleet_records", id));
-      setRecords(records.filter((r) => r.id !== id));
-      alert("🗑️ Deleted successfully");
-    } catch (error) {
-      alert("❌ Delete error: " + error.message);
+    if (snapshot.empty) {
+      alert("❌ No records found for this fleet number.");
+      return;
     }
-  };
+
+    const confirmDelete = window.confirm(`Delete ALL versions for fleet number ${fleetNumberToDelete}?`);
+    if (!confirmDelete) return;
+
+    const batchDeletes = snapshot.docs.map(docSnap => deleteDoc(doc(db, "fleet_records", docSnap.id)));
+    await Promise.all(batchDeletes);
+
+    // Remove from both tables
+    setRecords(prev => prev.filter(r => r.fleetNumber !== fleetNumberToDelete));
+    setHistory(prev => prev.filter(r => r.fleetNumber !== fleetNumberToDelete));
+
+    alert(`✅ All versions of Fleet Number ${fleetNumberToDelete} deleted.`);
+  } catch (error) {
+    alert("❌ Delete error: " + error.message);
+  }
+};
+
 
   if (!user) return <Auth />;
 
@@ -220,7 +350,13 @@ const handleUpdate = async (row) => {
       <button onClick={() => signOut(auth)}>Logout</button>
       <hr />
       <UploadForm />
-      <ManualEntryForm onAddRow={(row) => setRecords([row])} />
+      <ManualEntryForm
+  onAddRow={(row, addToHistory) => {
+    setRecords([row]);
+    if (addToHistory) setHistory([row]);
+  }}
+/>
+
 
       <hr />
      <h4>Search Existing Records</h4>
@@ -253,7 +389,16 @@ const handleUpdate = async (row) => {
   />
 )}
 
-<button onClick={handleSearch} style={{ marginLeft: 10 }}>Search</button>
+<button onClick={handleSearch} style={{ marginLeft: 10 }} disabled={isSearching}>
+  {isSearching ? (
+    <>
+      Searching... <span className="loader-spinner" />
+    </>
+  ) : (
+    "Search"
+  )}
+</button>
+
 </div>
 
       <hr />
@@ -300,15 +445,21 @@ const handleUpdate = async (row) => {
 
                 
                 <td>
-                 <button onClick={() => handleUpdate(row)}>Save</button>
+                 <button
+  className="save"
+  disabled={!hasMeaningfulChanges(row, originalRecords[row.id])}
+  onClick={() => handleUpdate(row)}
+>
+  Save
+</button>
+
 <button
   className="delete"
-  onClick={() => {
-    if (window.confirm("Delete this row?")) handleDelete(row.id);
-  }}
+  onClick={() => handleDelete(row.fleetNumber)}
 >
   Delete
 </button>
+
 
                 </td>
               </tr>
@@ -324,7 +475,11 @@ const handleUpdate = async (row) => {
         <>
           <hr />
           <h4>🔍 Full Version History</h4>
-          <button onClick={handleExport}>📄 Export to Excel</button>
+          <button onClick={handleExport} disabled={isExporting}>
+  📄 Export to Excel
+  {isExporting && <span className="loader-spinner" />}
+</button>
+
           <div className="table-scroll-x">
             <table>
               <thead>
@@ -361,9 +516,15 @@ const handleUpdate = async (row) => {
                   ))}
               </tbody>
             </table>
-          </div>
+          </div>  
         </>
       )}
+      {records.length === 0 && history.length === 0 && (
+  <p style={{ textAlign: "center", color: "#888", marginTop: "30px" }}>
+    No records to display.
+  </p>
+)}
+      <ToastContainer position="bottom-right" autoClose={3000} />
       <p style={{ textAlign: "center", marginTop: "30px", color: "#666" }}>
   © 2025 Fleet Billing System
 </p>

@@ -114,12 +114,15 @@ input[type="text"] {
 
 .table-scroll-x {
   overflow-x: auto;
+  overflow-y: auto;           /* ✅ Enable vertical scroll */
+  max-height: 1000px;          /* ✅ Set vertical scroll limit */
   max-width: 100%;
   border: 1px solid #ccc;
   border-radius: 6px;
   padding: 5px;
   background-color: #fff;
 }
+
 
 table {
   width: 100%;

@@ -114,8 +114,7 @@ const ManualEntryForm = ({ onAddRow }) => {
     };
 
     const docRef = await addDoc(collection(db, "fleet_records"), enrichedData);
-    onAddRow({ id: docRef.id, ...enrichedData });
-
+    onAddRow({ id: docRef.id, ...enrichedData }, true); // Add to current + history
     setFormData(initialForm);
 
     await navigator.clipboard.writeText(String(fleetNumber));
