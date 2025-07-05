@@ -215,3 +215,17 @@ html {
 ::-webkit-scrollbar-thumb:hover {
   background: #888;
 }
+
+
+.export-button {
+  padding: 6px 12px;
+  background-color: #007bff;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.export-button:hover {
+  background-color: #0056b3;
+}
