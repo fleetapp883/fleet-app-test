@@ -21,7 +21,7 @@ import "react-toastify/dist/ReactToastify.css";
 import * as XLSX from "xlsx";
 
 const finalColumnOrder = [
-  "fleetNumber", "date", "months", "indentNo", "origin", "destination", "customer", "customerType",
+  "indentNumber", "date", "months", "origin", "destination", "customer", "customerType",
   "vehicleNo", "vendor", "salesRate", "buyRate", "createdAt", "createdBy", "versionDate",
   "isCurrent", "updateDescription", "expiredAt",
   // Customer Master
@@ -58,56 +58,72 @@ const flattenObject = (obj, prefix = "") => {
 
 function App() {
   const [user, setUser] = useState(null);
+  const [authLoading, setAuthLoading] = useState(true);
   const [records, setRecords] = useState([]);
   const [history, setHistory] = useState([]);
   const [searchKey, setSearchKey] = useState("");
-  const [searchField, setSearchField] = useState("fleetNumber");
+  const [searchField, setSearchField] = useState("indentNumber");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const [originalRecords, setOriginalRecords] = useState({});
   const [isSearching, setIsSearching] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [searchAttempted, setSearchAttempted] = useState(false);
+  const [activeOnly, setActiveOnly] = useState(false);
+  const [includeCustomer, setIncludeCustomer] = useState(false);
+  const [includeVendor, setIncludeVendor] = useState(false);
+  const [includePOD, setIncludePOD] = useState(false);
+
+
 
 
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
+      setAuthLoading(false);
     });
     return () => unsubscribe();
   }, []);
 
   const handleExportToExcel = () => {
-    if (history.length === 0) {
-      toast.info("❌ No history data to export.");
-      return;
-    }
+  if (history.length === 0) {
+    toast.info("❌ No history data to export.");
+    return;
+  }
 
-    const exportData = history.map((row) => {
-      const flatRow = {};
-      finalColumnOrder.forEach((col) => {
-        const val = row[col];
-        if (val?.seconds) {
-          flatRow[col] = new Date(val.seconds * 1000).toLocaleString();
-        } else {
-          flatRow[col] = val ?? "";
-        }
-      });
-      return flatRow;
+  // Define columns to include
+  const fixedCols = finalColumnOrder.slice(0, 17); // First 17 are fixed
+  const customerCols = finalColumnOrder.slice(17, 32);
+  const vendorCols = finalColumnOrder.slice(32, 36);
+  const podCols = finalColumnOrder.slice(36);
+
+  const selectedCols = [
+    ...fixedCols,
+    ...(includeCustomer ? customerCols : []),
+    ...(includeVendor ? vendorCols : []),
+    ...(includePOD ? podCols : [])
+  ];
+
+  const exportData = history.map((row) => {
+    const flatRow = {};
+    selectedCols.forEach((col) => {
+      const val = row[col];
+      flatRow[col] = val?.seconds
+        ? new Date(val.seconds * 1000).toLocaleString()
+        : val ?? "";
     });
+    return flatRow;
+  });
 
-    const worksheet = XLSX.utils.json_to_sheet(exportData);
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, "Fleet History");
+  const worksheet = XLSX.utils.json_to_sheet(exportData);
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, worksheet, "Filtered Export");
 
-    const fileName =
-      searchField === "fleetNumber" && searchKey
-        ? `FleetHistory_${searchKey}.xlsx`
-        : `FleetHistory_${new Date().toISOString().split("T")[0]}.xlsx`;
+  const fileName = `FilteredExport_${new Date().toISOString().split("T")[0]}.xlsx`;
+  XLSX.writeFile(workbook, fileName);
+};
 
-    XLSX.writeFile(workbook, fileName);
-  };
 
   const handleSearch = async () => {
     setIsSearching(true);
@@ -115,27 +131,33 @@ function App() {
       const fleetRef = collection(db, "fleet_records");
       let q;
 
-      if (searchField === "Date") {
-        if (!startDate || !endDate) {
-          toast.warn("📅 Please select both From and To dates.");
-          setIsSearching(false);
-          return;
-        }
+          if (searchField === "Date") {
+  const fromDate = new Date(startDate);
+  const toDate = new Date(endDate + "T23:59:59");
 
-        const fromDate = new Date(startDate);
-        const toDate = new Date(endDate + "T23:59:59");
+  if (fromDate > toDate) {
+    toast.warn("⚠️ 'From' date cannot be after 'To' date.");
+    setIsSearching(false);
+    return;
+  }
 
-        if (fromDate > toDate) {
-          toast.warn("⚠️ 'From' date cannot be after 'To' date.");
-          setIsSearching(false);
-          return;
-        }
+  q = query(
+    fleetRef,
+    ...(activeOnly ? [where("isCurrent", "==", true)] : []),
+    where("createdAt", ">=", fromDate),
+    where("createdAt", "<=", toDate)
+  );
+}
+ else if (searchKey) {
+  const key = searchField === "indentNumber" ? Number(searchKey) : searchKey;
+  q = query(
+    fleetRef,
+    where(searchField, "==", key),
+    ...(activeOnly ? [where("isCurrent", "==", true)] : [])
+  );
+}
 
-        q = query(fleetRef, where("createdAt", ">=", fromDate), where("createdAt", "<=", toDate));
-      } else if (searchKey) {
-        const key = searchField === "fleetNumber" ? Number(searchKey) : searchKey;
-        q = query(fleetRef, where(searchField, "==", key));
-      } else {
+ else {
         toast.warn("🔍 Please enter a search value.");
         setIsSearching(false);
         return;
@@ -153,8 +175,16 @@ function App() {
         allVersions.push(row);
         if (row.isCurrent) currentOnly.push(row);
       });
+      allVersions.sort((a, b) => {
+  if (a.isCurrent && !b.isCurrent) return -1;
+  if (!a.isCurrent && b.isCurrent) return 1;
+  return b.indentNumber - a.indentNumber;
+});
 
-      if (searchField === "fleetNumber") {
+// ✅ Sort currentOnly also by indentNumber descending
+currentOnly.sort((a, b) => b.indentNumber - a.indentNumber);
+
+      if (searchField === "indentNumber") {
         setRecords(currentOnly);
         setHistory(allVersions);
       } else {
@@ -166,7 +196,9 @@ function App() {
         toast.info("❌ No records found.");
       }
     } catch (error) {
-      toast.error("❌ Search failed: " + error.message);
+  console.error("🔥 Full Firestore Error:", error); // ✅ This will print full error in browser console
+  toast.error("❌ Search failed: " + error.message);
+
     } finally {
       setIsSearching(false);
     }
@@ -179,30 +211,37 @@ function App() {
       : String(val).trim();
   };
 
-  const getChangedFields = (current, original) => {
-    const ignored = ["versionDate", "expiredAt", "isCurrent", "updateDescription", "createdAt", "createdBy"];
-    const changed = [];
-    for (const key in current) {
-      if (ignored.includes(key)) continue;
-      const currVal = normalize(current[key]);
-      const origVal = normalize(original?.[key]);
-      if (currVal !== origVal) changed.push(key);
-    }
-    return changed;
-  };
+ const getChangedFields = (current, original) => {
+  const ignored = ["versionDate", "expiredAt", "isCurrent", "updateDescription", "createdAt", "createdBy"];
+  const changed = [];
+
+  const flatCurrent = flattenObject(current);
+  const flatOriginal = flattenObject(original);
+
+  for (const key in flatCurrent) {
+    if (ignored.includes(key)) continue;
+    const currVal = normalize(flatCurrent[key]);
+    const origVal = normalize(flatOriginal?.[key]);
+    if (currVal !== origVal) changed.push(key);
+  }
+
+  return changed;
+};
+
 
   const hasMeaningfulChanges = (curr, orig) => getChangedFields(curr, orig).length > 0;
 
 
     const handleUpdate = async (row) => {
     try {
-      const { id, fleetNumber, ...updatedData } = row;
+      const { id, indentNumber, ...updatedData } = row;
 
       const currentDocSnap = await getDocs(
-        query(collection(db, "fleet_records"), where("fleetNumber", "==", fleetNumber), where("isCurrent", "==", true))
+        query(collection(db, "fleet_records"), where("indentNumber", "==", indentNumber), where("isCurrent", "==", true))
       );
       const oldDoc = currentDocSnap.docs.find(doc => doc.id === id);
-      const oldData = oldDoc?.data() || {};
+      const oldData = flattenObject(oldDoc?.data() || {});
+
 
       const cleanData = {};
       const updateLog = [];
@@ -234,7 +273,7 @@ function App() {
 
       const newVersion = {
         ...cleanData,
-        fleetNumber,
+        indentNumber,
         createdAt: new Date(),
         createdBy: user.email,
         isCurrent: true,
@@ -253,22 +292,24 @@ function App() {
 
   const handleDelete = async (fleetNumberToDelete) => {
     try {
-      const q = query(collection(db, "fleet_records"), where("fleetNumber", "==", fleetNumberToDelete));
+      const q = query(collection(db, "fleet_records"), where("indentNumber", "==", fleetNumberToDelete));
       const snapshot = await getDocs(q);
       if (snapshot.empty) return alert("❌ No records found.");
 
-      const confirmDelete = window.confirm(`Delete all versions of fleet ${fleetNumberToDelete}?`);
+      const confirmDelete = window.confirm(`Delete all versions of Indent No. ${fleetNumberToDelete}?`);
       if (!confirmDelete) return;
 
       await Promise.all(snapshot.docs.map(docSnap => deleteDoc(doc(db, "fleet_records", docSnap.id))));
-      setRecords(prev => prev.filter(r => r.fleetNumber !== fleetNumberToDelete));
-      setHistory(prev => prev.filter(r => r.fleetNumber !== fleetNumberToDelete));
+      setRecords(prev => prev.filter(r => r.indentNumber !== fleetNumberToDelete));
+      setHistory(prev => prev.filter(r => r.indentNumber !== fleetNumberToDelete));
       toast.success("✅ Deleted all versions.");
     } catch (err) {
       toast.error("❌ Delete failed: " + err.message);
     }
   };
-  if (!user) return <Auth />;
+  if (authLoading) return <p style={{ textAlign: "center" }}>Checking authentication...</p>;
+if (!user) return <Auth />;
+
 
   return (
     <div style={{ maxWidth: "100vw", overflowX: "hidden", padding: "40px 20px" }}>
@@ -298,7 +339,7 @@ function App() {
 
       <hr />
 
-      <UploadForm />
+      {/* <UploadForm /> */}
 
       <ManualEntryForm
         onAddRow={(row, addToHistory) => {
@@ -309,43 +350,55 @@ function App() {
 
       <hr />
       <h4>Search Existing Records</h4>
-      <div className="search-bar">
-        <select value={searchField} onChange={(e) => {
-          setSearchField(e.target.value);
-          setSearchKey("");
-          setStartDate("");
-          setEndDate("");
-        }}>
-          <option value="fleetNumber">Fleet Number</option>
-          <option value="Broker">Broker</option>
-          <option value="Date">Date</option>
-        </select>
+<div className="search-bar" style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
+  <select value={searchField} onChange={(e) => {
+    setSearchField(e.target.value);
+    setSearchKey("");
+    setStartDate("");
+    setEndDate("");
+  }}>
+    <option value="indentNumber">Fleet Number</option>
+    <option value="Broker">Broker</option>
+    <option value="Date">Date</option>
+  </select>
 
-        {searchField === "Date" ? (
-          <>
-            <label style={{ marginLeft: 10 }}>From:</label>
-            <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
-            <label style={{ marginLeft: 10 }}>To:</label>
-            <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
-          </>
-        ) : (
-          <input
-            type="text"
-            value={searchKey}
-            onChange={(e) => setSearchKey(e.target.value)}
-            placeholder="Search key"
-            style={{ margin: "0 10px" }}
-          />
-        )}
+  {searchField === "Date" ? (
+    <>
+      <label>From:</label>
+      <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+      <label>To:</label>
+      <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
+    </>
+  ) : (
+    <input
+      type="text"
+      value={searchKey}
+      onChange={(e) => setSearchKey(e.target.value)}
+      placeholder="Search key"
+      style={{ width: "200px" }}
+    />
+  )}
 
-        <button onClick={handleSearch} style={{ marginLeft: 10 }} disabled={isSearching}>
-          {isSearching ? "Searching..." : "Search"}
-        </button>
-      </div>
+  {/* ✅ Add checkbox here */}
+  <label style={{ display: "flex", alignItems: "center", fontSize: "14px" }}>
+    <input
+      type="checkbox"
+      checked={activeOnly}
+      onChange={(e) => setActiveOnly(e.target.checked)}
+      style={{ marginRight: "5px" }}
+    />
+    Show only active
+  </label>
+
+  <button onClick={handleSearch} disabled={isSearching}>
+    {isSearching ? "Searching..." : "Search"}
+  </button>
+</div>
+
 
       <hr />
 
-      {searchField === "fleetNumber" && records.length > 0 && (
+      {searchField === "indentNumber" && records.length > 0 && (
         <>
           <h4>Editable Current Records</h4>
           <div className="table-scroll-x">
@@ -367,15 +420,18 @@ function App() {
                           type="text"
                           value={
                             typeof row[col] === "object" && row[col]?.seconds
-                              ? new Date(row[col].seconds * 1000).toLocaleString()
-                              : String(row[col] ?? "")
-                          }
+                              ? (col === "date"
+            ? new Date(row[col].seconds * 1000).toLocaleDateString("en-GB")
+            : new Date(row[col].seconds * 1000).toLocaleString()
+          )
+        : String(row[col] ?? "")
+    }
                           onChange={(e) => {
                             const updated = [...records];
                             updated[rowIndex][col] = e.target.value;
                             setRecords(updated);
                           }}
-                          readOnly={["fleetNumber", "createdAt", "createdBy", "isCurrent", "updateDescription"].includes(col)}
+                          readOnly={["indentNumber", "createdAt", "createdBy", "isCurrent", "updateDescription"].includes(col)}
                           style={{ width: "140px" }}
                         />
                       </td>
@@ -384,7 +440,7 @@ function App() {
                       <button className="save" onClick={() => handleUpdate(row)}>
                         Save
                       </button>
-                      <button className="delete" onClick={() => handleDelete(row.fleetNumber)}>
+                      <button className="delete" onClick={() => handleDelete(row.indentNumber)}>
                         Delete
                       </button>
                     </td>
@@ -402,9 +458,24 @@ function App() {
           <hr />
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
   <h4>🔍 Full Version History</h4>
+  <div style={{ display: "flex", gap: "20px", alignItems: "center" }}>
+  <label>
+    <input type="checkbox" checked={includeCustomer} onChange={(e) => setIncludeCustomer(e.target.checked)} />
+    Include Customer
+  </label>
+  <label>
+    <input type="checkbox" checked={includeVendor} onChange={(e) => setIncludeVendor(e.target.checked)} />
+    Include Vendor
+  </label>
+  <label>
+    <input type="checkbox" checked={includePOD} onChange={(e) => setIncludePOD(e.target.checked)} />
+    Include POD
+  </label>
   <button onClick={handleExportToExcel} disabled={history.length === 0} className="export-button">
-    ⬇️ Export to Excel
+    ⬇️ Export Selected
   </button>
+</div>
+
 </div>
         <div className="table-scroll-x">
           <table>
@@ -429,8 +500,10 @@ function App() {
                     {finalColumnOrder.map((col, j) => (
                       <td key={j}>
                         {typeof row[col] === "object" && row[col]?.seconds
-                          ? new Date(row[col].seconds * 1000).toLocaleString()
-                          : String(row[col] ?? "")}
+              ? (col === "date"
+                  ? new Date(row[col].seconds * 1000).toLocaleDateString("en-GB")
+                  : new Date(row[col].seconds * 1000).toLocaleString())
+              : String(row[col] ?? "")}
                       </td>
                     ))}
                   </tr>

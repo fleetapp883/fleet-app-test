@@ -17,7 +17,6 @@ import { db, auth } from "../firebase";
 const fixedFieldsInitial = {
   date: "",
   months: "",
-  indentNo: "",
   origin: "",
   destination: "",
   customer: "",
@@ -81,7 +80,7 @@ const ManualEntryForm = ({ onAddRow }) => {
   const [customerData, setCustomerData] = useState(customerFields);
   const [vendorData, setVendorData] = useState(vendorFields);
   const [podData, setPodData] = useState(podFields);
-  const [fleetNumber, setFleetNumber] = useState(null);
+  const [indentNumber, setIndentNumber] = useState(null);
   const [docId, setDocId] = useState(null);
 
   const [showCustomer, setShowCustomer] = useState(false);
@@ -93,7 +92,7 @@ const ManualEntryForm = ({ onAddRow }) => {
   const [podSaved, setPodSaved] = useState(false);
 
   useEffect(() => {
-    const storedFleetNo = localStorage.getItem("inProgressFleetNumber");
+    const storedIndentNo = localStorage.getItem("inProgressIndentNumber");
     const storedFixed = localStorage.getItem("fixedFields");
     const storedCustomer = localStorage.getItem("customerFields");
     const storedVendor = localStorage.getItem("vendorFields");
@@ -102,7 +101,7 @@ const ManualEntryForm = ({ onAddRow }) => {
     
     
     if (storedDocId) setDocId(storedDocId);
-    if (storedFleetNo) setFleetNumber(Number(storedFleetNo));
+    if (storedIndentNo) setIndentNumber(Number(storedIndentNo));
     if (storedFixed) setFixedFields(JSON.parse(storedFixed));
     if (storedCustomer) setCustomerData(JSON.parse(storedCustomer));
     if (storedVendor) setVendorData(JSON.parse(storedVendor));
@@ -149,24 +148,25 @@ const ManualEntryForm = ({ onAddRow }) => {
 };
 
 
-  const getNextFleetNumber = async () => {
-    const counterRef = doc(db, "Counters", "fleet_counter");
-    const newFleetNo = await runTransaction(db, async (transaction) => {
-      const docSnap = await transaction.get(counterRef);
-      if (!docSnap.exists()) throw new Error("Counter doc missing");
-      const current = docSnap.data().nextFleetNo || 1;
-      transaction.update(counterRef, { nextFleetNo: current + 1 });
-      return current;
-    });
-    return newFleetNo;
-  };
+  const getNextIndentNumber = async () => {
+  const counterRef = doc(db, "Counters", "fleet_counter");
+  const newIndentNo = await runTransaction(db, async (transaction) => {
+    const docSnap = await transaction.get(counterRef);
+    if (!docSnap.exists()) throw new Error("Counter doc missing");
+    const current = docSnap.data().nextFleetNo || 1;
+    transaction.update(counterRef, { nextFleetNo: current + 1 });
+    return current;
+  });
+  return newIndentNo;
+};
+
 
   const handleFixedSave = async () => {
     try {
       const user = auth.currentUser;
-      const fleetNo = await getNextFleetNumber();
+      const indentNo  = await getNextIndentNumber();
       const enrichedData = {
-        fleetNumber: fleetNo,
+        indentNumber: indentNo,
         ...convertDateFields(fixedFields, ["date"]),
         createdAt: new Date(),
         createdBy: user?.email || "anonymous",
@@ -176,12 +176,12 @@ const ManualEntryForm = ({ onAddRow }) => {
       };
 
       const docRef = await addDoc(collection(db, "fleet_records"), enrichedData);
-      setFleetNumber(fleetNo);
+      setIndentNumber(indentNo);
       setDocId(docRef.id);
       localStorage.setItem("docId", docRef.id);
-      localStorage.setItem("inProgressFleetNumber", fleetNo);
-      await navigator.clipboard.writeText(String(fleetNo));
-      alert(`✅ Fixed fields saved. Fleet Number copied: ${fleetNo}`);
+      localStorage.setItem("inProgressIndentNumber", indentNo);
+      await navigator.clipboard.writeText(String(indentNo));
+      alert(`✅ Fixed fields saved. Indent Number copied: ${indentNo}`);
     } catch (err) {
       alert("❌ Error saving fixed fields: " + err.message);
     }
@@ -231,7 +231,7 @@ const ManualEntryForm = ({ onAddRow }) => {
   setCustomerData(customerFields);
   setVendorData(vendorFields);
   setPodData(podFields);
-  setFleetNumber(null);
+  setIndentNumber(null);
   setDocId(null);
   setShowCustomer(false);
   setShowVendor(false);
@@ -244,13 +244,40 @@ const ManualEntryForm = ({ onAddRow }) => {
   localStorage.removeItem("customerFields");
   localStorage.removeItem("vendorFields");
   localStorage.removeItem("podFields");
-  localStorage.removeItem("inProgressFleetNumber");
+  localStorage.removeItem("inProgressIndentNumber");
   localStorage.removeItem("docId");
 
 
 
   alert("✅ Record submitted and ready in editable table.");
 };
+
+const handleNewRecord = () => {
+  if (!window.confirm("Start a new entry? Unsaved data will be lost.")) return;
+
+  setFixedFields(fixedFieldsInitial);
+  setCustomerData(customerFields);
+  setVendorData(vendorFields);
+  setPodData(podFields);
+  setIndentNumber(null);
+  setDocId(null);
+  setShowCustomer(false);
+  setShowVendor(false);
+  setShowPod(false);
+  setCustomerSaved(false);
+  setVendorSaved(false);
+  setPodSaved(false);
+
+  localStorage.removeItem("fixedFields");
+  localStorage.removeItem("customerFields");
+  localStorage.removeItem("vendorFields");
+  localStorage.removeItem("podFields");
+  localStorage.removeItem("inProgressIndentNumber");
+  localStorage.removeItem("docId");
+
+  alert("🆕 Ready to start a new record.");
+};
+
 
 
   return (
@@ -266,17 +293,17 @@ const ManualEntryForm = ({ onAddRow }) => {
             placeholder={label}
             value={fixedFields[key]}
             onChange={handleFixedChange}
-            disabled={!!fleetNumber}
+            disabled={!!indentNumber}
             style={{ margin: 4, width: "220px" }}
           />
         );
       })}
-      {!fleetNumber && (
+      {!indentNumber && (
         <button onClick={handleFixedSave}>💾 Save & Continue</button>
       )}
-      {fleetNumber && (
+      {indentNumber  && (
         <>
-          <p style={{ color: "green" }}>✅ Saved. Fleet No: {fleetNumber}</p>
+          <p style={{ color: "green" }}>✅ Saved. Indent No: {indentNumber}</p>
 
           <h4>Step 2: Select Master Sections</h4>
           <label>
@@ -358,9 +385,15 @@ const ManualEntryForm = ({ onAddRow }) => {
           )}
 
           <br />
-          <button onClick={handleFinalSubmit} style={{ marginTop: 10, backgroundColor: "#4caf50" }}>
-            ✅ Submit Record
-          </button>
+          <div style={{ marginTop: 10 }}>
+  <button onClick={handleFinalSubmit} style={{ backgroundColor: "#4caf50", marginRight: 10 }}>
+    ✅ Submit Record
+  </button>
+
+  <button onClick={handleNewRecord} style={{ backgroundColor: "#2196f3" }}>
+    ➕ Add New Record
+  </button>
+</div>
         </>
       )}
     </div>
