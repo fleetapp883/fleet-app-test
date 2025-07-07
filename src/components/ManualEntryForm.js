@@ -9,6 +9,9 @@ import {
   getDoc
 } from "firebase/firestore";
 import { db, auth } from "../firebase";
+import 'react-confirm-alert/src/react-confirm-alert.css';
+import { confirmAlert } from 'react-confirm-alert';
+
 
 
 
@@ -91,6 +94,8 @@ const ManualEntryForm = ({ onAddRow }) => {
   const [vendorSaved, setVendorSaved] = useState(false);
   const [podSaved, setPodSaved] = useState(false);
 
+
+
   useEffect(() => {
     const storedIndentNo = localStorage.getItem("inProgressIndentNumber");
     const storedFixed = localStorage.getItem("fixedFields");
@@ -107,6 +112,35 @@ const ManualEntryForm = ({ onAddRow }) => {
     if (storedVendor) setVendorData(JSON.parse(storedVendor));
     if (storedPod) setPodData(JSON.parse(storedPod));
   }, []);
+
+  const formatLabel = (key) => {
+  return key
+    .replace(/([a-z])([A-Z])/g, "$1 $2")   // add space before uppercase
+    .replace(/_/g, " ")                   // replace underscore with space
+    .replace(/^./, (str) => str.toUpperCase()); // capitalize first letter
+};
+
+  const resetAll = () => {
+  setFixedFields(fixedFieldsInitial);
+  setCustomerData(customerFields);
+  setVendorData(vendorFields);
+  setPodData(podFields);
+  setIndentNumber(null);
+  setDocId(null);
+  setShowCustomer(false);
+  setShowVendor(false);
+  setShowPod(false);
+  setCustomerSaved(false);
+  setVendorSaved(false);
+  setPodSaved(false);
+
+  localStorage.removeItem("fixedFields");
+  localStorage.removeItem("customerFields");
+  localStorage.removeItem("vendorFields");
+  localStorage.removeItem("podFields");
+  localStorage.removeItem("inProgressIndentNumber");
+  localStorage.removeItem("docId");
+};
 
   const convertDateFields = (data, allowedKeys = []) => {
     const result = {};
@@ -162,6 +196,24 @@ const ManualEntryForm = ({ onAddRow }) => {
 
 
   const handleFixedSave = async () => {
+    const hasAnyValue = Object.values(fixedFields).some(
+  val => String(val ?? "").trim() !== ""
+);
+
+if (!hasAnyValue) {
+  confirmAlert({
+    title: 'Validation Error',
+    message: '⚠️ Please fill at least one field before continuing.',
+    buttons: [
+      {
+        label: 'OK'
+      }
+    ]
+  });
+  return;
+}
+
+
     try {
       const user = auth.currentUser;
       const indentNo  = await getNextIndentNumber();
@@ -181,17 +233,34 @@ const ManualEntryForm = ({ onAddRow }) => {
       localStorage.setItem("docId", docRef.id);
       localStorage.setItem("inProgressIndentNumber", indentNo);
       await navigator.clipboard.writeText(String(indentNo));
-      alert(`✅ Fixed fields saved. Indent Number copied: ${indentNo}`);
+      confirmAlert({
+  title: 'Success',
+  message: `✅ Fixed fields saved. Indent Number copied: ${indentNo}`,
+  buttons: [
+    { label: 'OK' }
+  ]
+});
+
     } catch (err) {
-      alert("❌ Error saving fixed fields: " + err.message);
+      confirmAlert({
+  title: 'Error',
+  message: "❌ Error saving fixed fields: " + err.message,
+  buttons: [{ label: 'OK' }]
+});
+
     }
   };
 
   const saveSection = async (sectionName, sectionData, dateFields = []) => {
     if (!docId) {
-      alert("⚠️ Save fixed fields first.");
-      return;
-    }
+  confirmAlert({
+    title: 'Missing Info',
+    message: '⚠️ Save fixed fields first.',
+    buttons: [{ label: 'OK' }]
+  });
+  return;
+}
+
     try {
       const docRef = doc(db, "fleet_records", docId);
       await updateDoc(docRef, {
@@ -200,14 +269,32 @@ const ManualEntryForm = ({ onAddRow }) => {
       if (sectionName === "customerMaster") setCustomerSaved(true);
       if (sectionName === "vendorMaster") setVendorSaved(true);
       if (sectionName === "podMaster") setPodSaved(true);
-      alert(`✅ ${sectionName} saved.`);
+      confirmAlert({
+  title: 'Saved',
+  message: `✅ ${sectionName} saved.`,
+  buttons: [{ label: 'OK' }]
+});
+
     } catch (err) {
-      alert("❌ Save error: " + err.message);
+      confirmAlert({
+  title: 'Error',
+  message: "❌ Save error: " + err.message,
+  buttons: [{ label: 'OK' }]
+});
+
     }
   };
 
  const handleFinalSubmit = async () => {
-  if (!docId) return alert("Fleet data not ready.");
+  if (!docId) {
+  confirmAlert({
+    title: 'Error',
+    message: 'Fleet data not ready.',
+    buttons: [{ label: 'OK' }]
+  });
+  return;
+}
+
 
   // Save any unsaved sections first
   if (showCustomer && !customerSaved) {
@@ -221,7 +308,15 @@ const ManualEntryForm = ({ onAddRow }) => {
   }
 
   const docSnap = await getDoc(doc(db, "fleet_records", docId));
-  if (!docSnap.exists()) return alert("Data not found.");
+  if (!docSnap.exists()) {
+  confirmAlert({
+    title: 'Error',
+    message: 'Data not found.',
+    buttons: [{ label: 'OK' }]
+  });
+  return;
+}
+
   const data = { id: docSnap.id, ...docSnap.data() };
   onAddRow(flattenObject(data), true);
 
@@ -249,33 +344,35 @@ const ManualEntryForm = ({ onAddRow }) => {
 
 
 
-  alert("✅ Record submitted and ready in editable table.");
+  confirmAlert({
+  title: 'Done',
+  message: '✅ Record submitted and ready in editable table.',
+  buttons: [{ label: 'OK' }]
+});
+
 };
 
 const handleNewRecord = () => {
-  if (!window.confirm("Start a new entry? Unsaved data will be lost.")) return;
-
-  setFixedFields(fixedFieldsInitial);
-  setCustomerData(customerFields);
-  setVendorData(vendorFields);
-  setPodData(podFields);
-  setIndentNumber(null);
-  setDocId(null);
-  setShowCustomer(false);
-  setShowVendor(false);
-  setShowPod(false);
-  setCustomerSaved(false);
-  setVendorSaved(false);
-  setPodSaved(false);
-
-  localStorage.removeItem("fixedFields");
-  localStorage.removeItem("customerFields");
-  localStorage.removeItem("vendorFields");
-  localStorage.removeItem("podFields");
-  localStorage.removeItem("inProgressIndentNumber");
-  localStorage.removeItem("docId");
-
-  alert("🆕 Ready to start a new record.");
+  confirmAlert({
+    title: 'Confirm New Entry',
+    message: 'Start a new entry? Unsaved data will be lost.',
+    buttons: [
+      {
+        label: 'Yes',
+        onClick: () => {
+          resetAll();
+          confirmAlert({
+            title: 'Ready',
+            message: '🆕 Ready to start a new record.',
+            buttons: [{ label: 'OK' }]
+          });
+        }
+      },
+      {
+        label: 'No'
+      }
+    ]
+  });
 };
 
 
@@ -283,24 +380,57 @@ const handleNewRecord = () => {
   return (
     <div style={{ marginTop: 20 }}>
       <h4>Step 1: Fixed Fields</h4>
-      {Object.keys(fixedFieldsInitial).map((key) => {
-        const isDate = key.toLowerCase().includes("date");
-        const label = isDate ? `${key} (dd/mm/yyyy)` : key === "months" ? "months (e.g. Jul-2025)" : key;
-        return (
-          <input
-            key={key}
-            name={key}
-            placeholder={label}
-            value={fixedFields[key]}
-            onChange={handleFixedChange}
-            disabled={!!indentNumber}
-            style={{ margin: 4, width: "220px" }}
-          />
-        );
-      })}
-      {!indentNumber && (
-        <button onClick={handleFixedSave}>💾 Save & Continue</button>
-      )}
+<div className="card p-4 mb-4">
+  <div
+    className="fixed-fields-grid"
+    style={{
+      display: "grid",
+      gridTemplateColumns: "repeat(5, 1fr)",
+      gap: "16px",
+    }}
+  >
+    {Object.keys(fixedFieldsInitial).map((key) => {
+      const isDate = key.toLowerCase().includes("date");
+      const label =
+        isDate
+          ? `${key} (dd/mm/yyyy)`
+          : key === "months"
+          ? "months (e.g. Jul-2025)"
+          : key;
+
+      return (
+        <div key={key}>
+          <label className="form-label" style={{ fontWeight: "500" }}>
+  {formatLabel(key)}
+</label>
+<input
+  name={key}
+  className="form-control"
+  placeholder=""
+  value={fixedFields[key]}
+  onChange={handleFixedChange}
+  disabled={!!indentNumber}
+  type="text"
+/>
+
+        </div>
+      );
+    })}
+  </div>
+
+  {!indentNumber && (
+  <div style={{ marginTop: "20px", width: "100%", textAlign: "right" }}>
+    <button className="btn btn-primary" onClick={handleFixedSave}>
+      💾 Save & Continue
+    </button>
+  </div>
+)}
+
+ 
+
+</div>
+
+
       {indentNumber  && (
         <>
           <p style={{ color: "green" }}>✅ Saved. Indent No: {indentNumber}</p>
@@ -317,83 +447,150 @@ const handleNewRecord = () => {
           </label>
 
           {showCustomer && (
-            <>
-              <h5>Customer Master</h5>
-              {Object.keys(customerFields).map((key) => {
-                const isDate = ["advanceRecDate", "balanceRecDate"].includes(key);
-                const label = isDate ? `${key} (dd/mm/yyyy)` : key;
-                return (
-                  <input
-                    key={key}
-                    name={key}
-                    placeholder={label}
-                    value={customerData[key]}
-                    onChange={(e) => handleSectionChange(e, "customer")}
-                    style={{ margin: 4, width: "220px" }}
-                    disabled={customerSaved}
-                  />
-                );
-              })}
-              {!customerSaved && (
-                <button onClick={() => saveSection("customerMaster", customerData, ["advanceRecDate", "balanceRecDate"])}>Save Customer</button>
-              )}
-            </>
-          )}
+  <>
+    <h5>Customer Master</h5>
+    <div className="card p-3 mb-3">
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(5, 1fr)",
+          gap: "16px",
+        }}
+      >
+        {Object.keys(customerFields).map((key) => {
+          const isDate = ["advanceRecDate", "balanceRecDate"].includes(key);
+          const label = isDate ? `${key} (dd/mm/yyyy)` : key;
+          return (
+            <div key={key}>
+              <label className="form-label" style={{ fontWeight: "500" }}>
+  {formatLabel(key)}
+</label>
+<input
+  name={key}
+  className="form-control"
+  placeholder=""
+                value={customerData[key]}
+                onChange={(e) => handleSectionChange(e, "customer")}
+                disabled={customerSaved}
+                type="text"
+              />
+            </div>
+          );
+        })}
+      </div>
+      {!customerSaved && (
+  <div style={{ textAlign: "right", marginTop: "16px" }}>
+    <button
+      className="btn btn-primary"
+      onClick={() => saveSection("customerMaster", customerData, ["advanceRecDate", "balanceRecDate"])}
+    >
+      Save Customer
+    </button>
+  </div>
+)}
+
+    </div>
+  </>
+)}
+
 
           {showVendor && (
-            <>
-              <h5>Vendor Master</h5>
-              {Object.keys(vendorFields).map((key) => (
-                <input
-                  key={key}
-                  name={key}
-                  placeholder={key}
-                  value={vendorData[key]}
-                  onChange={(e) => handleSectionChange(e, "vendor")}
-                  style={{ margin: 4, width: "220px" }}
-                  disabled={vendorSaved}
-                />
-              ))}
-              {!vendorSaved && (
-                <button onClick={() => saveSection("vendorMaster", vendorData)}>Save Vendor</button>
-              )}
-            </>
-          )}
+  <>
+    <h5>Vendor Master</h5>
+    <div className="card p-3 mb-3">
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(5, 1fr)",
+          gap: "16px",
+        }}
+      >
+        {Object.keys(vendorFields).map((key) => {
+          const label = key;
+          return (
+            <div key={key}>
+              <label className="form-label" style={{ fontWeight: "500" }}>
+  {formatLabel(key)}
+</label>
+<input
+  name={key}
+  className="form-control"
+  placeholder=""
+                value={vendorData[key]}
+                onChange={(e) => handleSectionChange(e, "vendor")}
+                disabled={vendorSaved}
+                type="text"
+              />
+            </div>
+          );
+        })}
+      </div>
+      {!vendorSaved && (
+        <div style={{ textAlign: "right", marginTop: "16px" }}>
+        <button className="btn btn-primary mt-3" onClick={() => saveSection("vendorMaster", vendorData)}>
+          Save Vendor
+        </button>
+        </div>
+      )}
+    </div>
+  </>
+)}
+
 
           {showPod && (
-            <>
-              <h5>POD Master</h5>
-              {Object.keys(podFields).map((key) => {
-                const isDate = ["podVendorDate", "podSendToCustomerDate", "podCustomerRec", "today"].includes(key);
-                const label = isDate ? `${key} (dd/mm/yyyy)` : key;
-                return (
-                  <input
-                    key={key}
-                    name={key}
-                    placeholder={label}
-                    value={podData[key]}
-                    onChange={(e) => handleSectionChange(e, "pod")}
-                    style={{ margin: 4, width: "220px" }}
-                    disabled={podSaved}
-                  />
-                );
-              })}
-              {!podSaved && (
-                <button onClick={() => saveSection("podMaster", podData, ["podVendorDate", "podSendToCustomerDate", "podCustomerRec", "today"])}>Save POD</button>
-              )}
-            </>
-          )}
+  <>
+    <h5>POD Master</h5>
+    <div className="card p-3 mb-3">
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(5, 1fr)",
+          gap: "16px",
+        }}
+      >
+        {Object.keys(podFields).map((key) => {
+          const isDate = ["podVendorDate", "podSendToCustomerDate", "podCustomerRec", "today"].includes(key);
+          const label = isDate ? `${key} (dd/mm/yyyy)` : key;
+          return (
+            <div key={key}>
+              <label className="form-label" style={{ fontWeight: "500" }}>
+  {formatLabel(key)}
+</label>
+<input
+  name={key}
+  className="form-control"
+  placeholder=""
+                value={podData[key]}
+                onChange={(e) => handleSectionChange(e, "pod")}
+                disabled={podSaved}
+                type="text"
+              />
+            </div>
+          );
+        })}
+      </div>
+      {!podSaved && (
+        <div style={{ textAlign: "right", marginTop: "16px" }}>
+        <button className="btn btn-primary mt-3" onClick={() => saveSection("podMaster", podData, ["podVendorDate", "podSendToCustomerDate", "podCustomerRec", "today"])}>
+          Save POD
+        </button>
+        </div>
+      )}
+    </div>
+  </>
+)}
+
 
           <br />
-          <div style={{ marginTop: 10 }}>
-  <button onClick={handleFinalSubmit} style={{ backgroundColor: "#4caf50", marginRight: 10 }}>
+          <div style={{ marginTop: 10, width: "100%", textAlign: "right" }}>
+  <button onClick={handleFinalSubmit} className="btn btn-success me-2">
     ✅ Submit Record
   </button>
-
-  <button onClick={handleNewRecord} style={{ backgroundColor: "#2196f3" }}>
+  <button onClick={handleNewRecord} className="btn btn-primary">
     ➕ Add New Record
   </button>
 </div>
+
         </>
       )}
     </div>

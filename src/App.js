@@ -19,6 +19,9 @@ import "./App.css";
 import { toast, ToastContainer } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
 import * as XLSX from "xlsx";
+import { confirmAlert } from 'react-confirm-alert';
+import 'react-confirm-alert/src/react-confirm-alert.css';
+
 
 const finalColumnOrder = [
   "indentNumber", "date", "months", "origin", "destination", "customer", "customerType",
@@ -39,6 +42,58 @@ const finalColumnOrder = [
   "podMaster.podCustomerRec", "podMaster.today", "podMaster.balanceOverdueDays",
   "podMaster.toBeCollectedAmount"
 ];
+
+const columnLabels = {
+  indentNumber: "Indent Number",
+  date: "Date",
+  months: "Month",
+  origin: "Origin",
+  destination: "Destination",
+  customer: "Customer",
+  customerType: "Customer Type",
+  vehicleNo: "Vehicle Number",
+  vendor: "Vendor",
+  salesRate: "Sales Rate",
+  buyRate: "Buy Rate",
+  createdAt: "Created At",
+  createdBy: "Created By",
+  versionDate: "Version Date",
+  isCurrent: "Is Current",
+  updateDescription: "Update Description",
+  expiredAt: "Expired At",
+
+  // Customer Master
+  "customerMaster.toBeAdvance": "Customer Master -> To be Advance (Sales)",
+  "customerMaster.advanceReceived": "Customer Master -> Advance / Payment Received",
+  "customerMaster.advDeviation": "Customer Master -> Adv Deviation (as on Date)",
+  "customerMaster.advanceRecDate": "Customer Master -> Advance Rec Date",
+  "customerMaster.validatedAdvanceUTRDescription": "Customer Master -> Validated-Advance UTR Description",
+  "customerMaster.validatedAdvanceAmount": "Customer Master -> Validated UTR - Advance Amount",
+  "customerMaster.balance": "Customer Master -> Balance",
+  "customerMaster.processingCharges": "Customer Master -> Processing Charges",
+  "customerMaster.inwardMisCharges": "Customer Master -> Inward-Mis Charges",
+  "customerMaster.outwardMisCharges": "Customer Master -> Outward-Mis Charges",
+  "customerMaster.balanceReceived": "Customer Master -> Bal Received",
+  "customerMaster.remainingBalance": "Customer Master -> Remaining Balance",
+  "customerMaster.balanceRecDate": "Customer Master -> Balance Rec Date",
+  "customerMaster.validatedBalanceUTR": "Customer Master -> Validated-Balance UTR",
+  "customerMaster.validatedBalanceUTRAmount": "Customer Master -> Validate Balance UTR-Amount",
+
+  // Vendor Master
+  "vendorMaster.vendorOutwardPayment": "Vendor Master -> Outward Payment",
+  "vendorMaster.paidAmount": "Vendor Master -> Paid Amount",
+  "vendorMaster.balancePending": "Vendor Master -> Balance Pending",
+  "vendorMaster.vendorRemark": "Vendor Master -> Vendor Remark",
+
+  // POD Master
+  "podMaster.podVendorDate": "POD Master -> POD Vendor-Date",
+  "podMaster.podSendToCustomerDate": "POD Master -> POD-Send to Customer Date",
+  "podMaster.docNo": "POD Master -> Doc No",
+  "podMaster.podCustomerRec": "POD Master -> POD-Customer Rec",
+  "podMaster.today": "POD Master -> Today",
+  "podMaster.balanceOverdueDays": "POD Master -> Balance Overdue Days",
+  "podMaster.toBeCollectedAmount": "POD Master -> To be Collected Amount"
+};
 
 
 const flattenObject = (obj, prefix = "") => {
@@ -196,7 +251,6 @@ currentOnly.sort((a, b) => b.indentNumber - a.indentNumber);
         toast.info("❌ No records found.");
       }
     } catch (error) {
-  console.error("🔥 Full Firestore Error:", error); // ✅ This will print full error in browser console
   toast.error("❌ Search failed: " + error.message);
 
     } finally {
@@ -262,8 +316,41 @@ currentOnly.sort((a, b) => b.indentNumber - a.indentNumber);
         return;
       }
 
-      const confirm = window.confirm(`Update changes: ${updateLog.join(", ")}?`);
-      if (!confirm) return;
+      confirmAlert({
+  title: 'Confirm Update',
+  message: `Do you want to update changes: ${updateLog.join(", ")}?`,
+  buttons: [
+    {
+      label: 'Yes',
+      onClick: async () => {
+        await updateDoc(doc(db, "fleet_records", id), {
+          isCurrent: false,
+          expiredAt: new Date(),
+          modifiedBy: user.email
+        });
+
+        const newVersion = {
+          ...cleanData,
+          indentNumber,
+          createdAt: new Date(),
+          createdBy: user.email,
+          isCurrent: true,
+          versionDate: new Date(),
+          updateDescription: updateLog.join(", ")
+        };
+
+        await addDoc(collection(db, "fleet_records"), newVersion);
+        toast.success("✅ Record updated.");
+        handleSearch();
+      }
+    },
+    {
+      label: 'No'
+    }
+  ]
+});
+return;
+
 
       await updateDoc(doc(db, "fleet_records", id), {
         isCurrent: false,
@@ -294,10 +381,32 @@ currentOnly.sort((a, b) => b.indentNumber - a.indentNumber);
     try {
       const q = query(collection(db, "fleet_records"), where("indentNumber", "==", fleetNumberToDelete));
       const snapshot = await getDocs(q);
-      if (snapshot.empty) return alert("❌ No records found.");
+      if (snapshot.empty) {
+  toast.error("❌ No records found for deletion.");
+  return;
+}
 
-      const confirmDelete = window.confirm(`Delete all versions of Indent No. ${fleetNumberToDelete}?`);
-      if (!confirmDelete) return;
+
+      confirmAlert({
+  title: 'Confirm Deletion',
+  message: `Delete all versions of Indent No. ${fleetNumberToDelete}?`,
+  buttons: [
+    {
+      label: 'Yes',
+      onClick: async () => {
+        await Promise.all(snapshot.docs.map(docSnap => deleteDoc(doc(db, "fleet_records", docSnap.id))));
+        setRecords(prev => prev.filter(r => r.indentNumber !== fleetNumberToDelete));
+        setHistory(prev => prev.filter(r => r.indentNumber !== fleetNumberToDelete));
+        toast.success("✅ Deleted all versions.");
+      }
+    },
+    {
+      label: 'No'
+    }
+  ]
+});
+return;
+
 
       await Promise.all(snapshot.docs.map(docSnap => deleteDoc(doc(db, "fleet_records", docSnap.id))));
       setRecords(prev => prev.filter(r => r.indentNumber !== fleetNumberToDelete));
@@ -350,53 +459,56 @@ if (!user) return <Auth />;
 
       <hr />
       <h4>Search Existing Records</h4>
-<div className="search-bar" style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
-  <select value={searchField} onChange={(e) => {
-    setSearchField(e.target.value);
-    setSearchKey("");
-    setStartDate("");
-    setEndDate("");
-  }}>
-    <option value="indentNumber">Fleet Number</option>
-    <option value="Broker">Broker</option>
-    <option value="Date">Date</option>
-  </select>
+<div style={{ display: "flex", flexWrap: "wrap", gap: "10px", alignItems: "center", justifyContent: "space-between", width: "100%" }}>
+  <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", alignItems: "center" }}>
+    <select value={searchField} onChange={(e) => {
+      setSearchField(e.target.value);
+      setSearchKey("");
+      setStartDate("");
+      setEndDate("");
+    }}>
+      <option value="indentNumber">Fleet Number</option>
+      <option value="Broker">Broker</option>
+      <option value="Date">Date</option>
+    </select>
 
-  {searchField === "Date" ? (
-    <>
-      <label>From:</label>
-      <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
-      <label>To:</label>
-      <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
-    </>
-  ) : (
-    <input
-      type="text"
-      value={searchKey}
-      onChange={(e) => setSearchKey(e.target.value)}
-      placeholder="Search key"
-      style={{ width: "200px" }}
-    />
-  )}
+    {searchField === "Date" ? (
+      <>
+        <label>From:</label>
+        <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+        <label>To:</label>
+        <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
+      </>
+    ) : (
+      <input
+        type="text"
+        value={searchKey}
+        onChange={(e) => setSearchKey(e.target.value)}
+        placeholder="Search key"
+        style={{ flex: 1, width: "250px" }}
+      />
+    )}
 
-  {/* ✅ Add checkbox here */}
-  <label style={{ display: "flex", alignItems: "center", fontSize: "14px" }}>
-    <input
-      type="checkbox"
-      checked={activeOnly}
-      onChange={(e) => setActiveOnly(e.target.checked)}
-      style={{ marginRight: "5px" }}
-    />
-    Show only active
-  </label>
+    <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+    <label style={{  display: "flex", alignItems: "center", fontSize: "14px", marginBottom: 0 }}>
+      <input
+        type="checkbox"
+        checked={activeOnly}
+        onChange={(e) => setActiveOnly(e.target.checked)}
+        style={{ marginRight: "5px" }}
+      />
+      Show only active
+    </label>
+  </div>
 
-  <button onClick={handleSearch} disabled={isSearching}>
+  <button className="btn btn-primary" onClick={handleSearch} disabled={isSearching}>
     {isSearching ? "Searching..." : "Search"}
   </button>
-</div>
+</div></div>
+
+<hr />
 
 
-      <hr />
 
       {searchField === "indentNumber" && records.length > 0 && (
         <>
@@ -406,7 +518,7 @@ if (!user) return <Auth />;
               <thead>
                 <tr>
                   {finalColumnOrder.map((col) => (
-                    <th key={col}>{col.replaceAll(".", " → ")}</th>
+                    <th key={col}>{columnLabels[col] || col}</th>
                   ))}
                   <th>Action</th>
                 </tr>
@@ -482,7 +594,7 @@ if (!user) return <Auth />;
             <thead>
               <tr>
                 {finalColumnOrder.map((col) => (
-                  <th key={col}>{col.replaceAll(".", " → ")}</th>
+                  <th key={col} className="tight-header">{columnLabels[col] || col}</th>
                 ))}
               </tr>
             </thead>
