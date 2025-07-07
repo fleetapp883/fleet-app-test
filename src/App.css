@@ -231,8 +231,36 @@ html {
 }
 
 
+body {
+  background: linear-gradient(to bottom right, #e3f2fd, #ffffff);
+}
 
 
 
+
+/* Alternate row coloring + smooth look */
+table tbody tr:nth-child(even) {
+  background-color: #f0f8ff; /* Light sky blue tint */
+}
+
+table tbody tr:nth-child(odd) {
+  background-color: #ffffff; /* Soft white for contrast */
+}
+
+/* Optional: Add border and padding for a cleaner look */
+table td {
+  border-bottom: 1px solid #ccc;
+  padding: 8px;
+  font-size: 14px;
+}
+
+/* Fix input fields inside table */
+table td input {
+  background-color: #ffffff;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-size: 13px;
+}
 
 
