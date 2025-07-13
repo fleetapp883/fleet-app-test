@@ -319,6 +319,9 @@ if (!hasAnyValue) {
 
   const data = { id: docSnap.id, ...docSnap.data() };
   onAddRow(flattenObject(data), true);
+  localStorage.setItem("latestSearchField", "indentNumber");
+  localStorage.setItem("latestSearchKey", String(data.indentNumber));
+
 
 
   // Reset all state

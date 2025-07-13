@@ -323,7 +323,10 @@ currentOnly.sort((a, b) => b.indentNumber - a.indentNumber);
     {
       label: 'Yes',
       onClick: async () => {
+        const flattenedOld = flattenObject(oldDoc.data());
+
         await updateDoc(doc(db, "fleet_records", id), {
+          ...flattenedOld,
           isCurrent: false,
           expiredAt: new Date(),
           modifiedBy: user.email
@@ -340,8 +343,15 @@ currentOnly.sort((a, b) => b.indentNumber - a.indentNumber);
         };
 
         await addDoc(collection(db, "fleet_records"), newVersion);
+        setSearchField("indentNumber");
+        setSearchKey(String(indentNumber));
+        setSearchAttempted(true);
+        setActiveOnly(false); 
         toast.success("✅ Record updated.");
-        handleSearch();
+
+        setTimeout(() => {
+          handleSearch();
+        }, 500);
       }
     },
     {
@@ -349,14 +359,20 @@ currentOnly.sort((a, b) => b.indentNumber - a.indentNumber);
     }
   ]
 });
+
+
+
+
 return;
 
 
       await updateDoc(doc(db, "fleet_records", id), {
+        ...oldDoc.data(),
         isCurrent: false,
         expiredAt: new Date(),
         modifiedBy: user.email
       });
+
 
       const newVersion = {
         ...cleanData,
@@ -451,11 +467,18 @@ if (!user) return <Auth />;
       {/* <UploadForm /> */}
 
       <ManualEntryForm
-        onAddRow={(row, addToHistory) => {
-          setRecords([row]);
-          if (addToHistory) setHistory([row]);
-        }}
-      />
+      onAddRow={(row, addToHistory) => {
+        setRecords([row]);
+        if (addToHistory) setHistory([row]);
+
+        // ✅ Store latest indentNumber to maintain search context
+        setSearchField("indentNumber");
+        setSearchKey(String(row.indentNumber));
+        setSearchAttempted(true);
+        setActiveOnly(false);
+      }}
+    />
+
 
       <hr />
       <h4>Search Existing Records</h4>
