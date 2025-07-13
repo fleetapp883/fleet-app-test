@@ -24,7 +24,7 @@ import 'react-confirm-alert/src/react-confirm-alert.css';
 
 
 const finalColumnOrder = [
-  "indentNumber", "date", "months", "origin", "destination", "customer", "customerType",
+  "indentNumber", "date","deliveryDate", "months", "origin", "destination", "customer", "customerType",
   "vehicleNo", "vendor", "salesRate", "buyRate", "createdAt", "createdBy", "versionDate",
   "isCurrent", "updateDescription", "expiredAt",
   // Customer Master
@@ -45,7 +45,8 @@ const finalColumnOrder = [
 
 const columnLabels = {
   indentNumber: "Indent Number",
-  date: "Date",
+  date: "Placement Date",
+  deliveryDate: "Delivery Date",
   months: "Month",
   origin: "Origin",
   destination: "Destination",
@@ -490,7 +491,7 @@ if (!user) return <Auth />;
       setStartDate("");
       setEndDate("");
     }}>
-      <option value="indentNumber">Fleet Number</option>
+      <option value="indentNumber">Indent Number</option>
       <option value="Broker">Broker</option>
       <option value="Date">Date</option>
     </select>

@@ -19,6 +19,7 @@ import { confirmAlert } from 'react-confirm-alert';
 
 const fixedFieldsInitial = {
   date: "",
+  deliveryDate: "",
   months: "",
   origin: "",
   destination: "",
@@ -114,10 +115,11 @@ const ManualEntryForm = ({ onAddRow }) => {
   }, []);
 
   const formatLabel = (key) => {
+  if (key === "date") return "Placement Date";
   return key
-    .replace(/([a-z])([A-Z])/g, "$1 $2")   // add space before uppercase
-    .replace(/_/g, " ")                   // replace underscore with space
-    .replace(/^./, (str) => str.toUpperCase()); // capitalize first letter
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .replace(/_/g, " ")
+    .replace(/^./, (str) => str.toUpperCase());
 };
 
   const resetAll = () => {
@@ -219,7 +221,7 @@ if (!hasAnyValue) {
       const indentNo  = await getNextIndentNumber();
       const enrichedData = {
         indentNumber: indentNo,
-        ...convertDateFields(fixedFields, ["date"]),
+        ...convertDateFields(fixedFields, ["date","deliveryDate"]),
         createdAt: new Date(),
         createdBy: user?.email || "anonymous",
         isCurrent: true,
@@ -406,15 +408,27 @@ const handleNewRecord = () => {
           <label className="form-label" style={{ fontWeight: "500" }}>
   {formatLabel(key)}
 </label>
-<input
-  name={key}
-  className="form-control"
-  placeholder=""
-  value={fixedFields[key]}
-  onChange={handleFixedChange}
-  disabled={!!indentNumber}
-  type="text"
-/>
+{(key === "date" || key === "deliveryDate") ? (
+  <input
+    type="date"
+    name={key}
+    className="form-control"
+    value={fixedFields[key]}
+    onChange={handleFixedChange}
+    disabled={!!indentNumber}
+  />
+) : (
+  <input
+    name={key}
+    className="form-control"
+    placeholder=""
+    value={fixedFields[key]}
+    onChange={handleFixedChange}
+    disabled={!!indentNumber}
+    type="text"
+  />
+)}
+
 
         </div>
       );
@@ -472,11 +486,12 @@ const handleNewRecord = () => {
   name={key}
   className="form-control"
   placeholder=""
-                value={customerData[key]}
-                onChange={(e) => handleSectionChange(e, "customer")}
-                disabled={customerSaved}
-                type="text"
-              />
+  value={customerData[key]}
+  onChange={(e) => handleSectionChange(e, "customer")}
+  disabled={customerSaved}
+  type={isDate ? "date" : "text"}
+/>
+
             </div>
           );
         })}
@@ -558,16 +573,17 @@ const handleNewRecord = () => {
             <div key={key}>
               <label className="form-label" style={{ fontWeight: "500" }}>
   {formatLabel(key)}
-</label>
-<input
-  name={key}
-  className="form-control"
-  placeholder=""
+            </label>
+              <input
+                name={key}
+                className="form-control"
+                placeholder=""
                 value={podData[key]}
                 onChange={(e) => handleSectionChange(e, "pod")}
                 disabled={podSaved}
-                type="text"
+                type={isDate ? "date" : "text"}
               />
+
             </div>
           );
         })}
