@@ -465,7 +465,7 @@ if (!user) return <Auth />;
 
       <hr />
 
-      {/* <UploadForm /> */}
+      <UploadForm />
 
       <ManualEntryForm
       onAddRow={(row, addToHistory) => {
