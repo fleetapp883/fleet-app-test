@@ -1,5 +1,8 @@
 {
   "projects": {
-    "default": "fleet-9805b"
-  }
+    "default": "fleet-9805b",
+    "prod": "fleet-9805b"
+  },
+  "targets": {},
+  "etags": {}
 }

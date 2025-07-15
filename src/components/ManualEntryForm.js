@@ -320,7 +320,9 @@ if (!hasAnyValue) {
 }
 
   const data = { id: docSnap.id, ...docSnap.data() };
-  onAddRow(flattenObject(data), true);
+  // onAddRow(JSON.parse(JSON.stringify(flattenObject(data))), true);
+  onAddRow(data, true);
+
   localStorage.setItem("latestSearchField", "indentNumber");
   localStorage.setItem("latestSearchKey", String(data.indentNumber));
 
@@ -356,6 +358,8 @@ if (!hasAnyValue) {
 });
 
 };
+
+
 
 const handleNewRecord = () => {
   confirmAlert({

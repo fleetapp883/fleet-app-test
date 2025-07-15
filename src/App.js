@@ -22,6 +22,14 @@ import * as XLSX from "xlsx";
 import { confirmAlert } from 'react-confirm-alert';
 import 'react-confirm-alert/src/react-confirm-alert.css';
 
+const dateFieldKeys = [
+  "date", "deliveryDate","createdAt", "versionDate", "expiredAt", "customerMaster.advanceRecDate", "customerMaster.balanceRecDate",
+  "customerMaster.advDeviation", "customerMaster.validatedAdvanceUTRDescription",
+  "customerMaster.validatedAdvanceAmount", "customerMaster.validatedBalanceUTR",
+  "customerMaster.validatedBalanceUTRAmount",
+  "podMaster.podVendorDate", "podMaster.podSendToCustomerDate", "podMaster.podCustomerRec", "podMaster.today"
+];
+
 
 const finalColumnOrder = [
   "indentNumber", "date","deliveryDate", "months", "origin", "destination", "customer", "customerType",
@@ -165,9 +173,11 @@ function App() {
     const flatRow = {};
     selectedCols.forEach((col) => {
       const val = row[col];
-      flatRow[col] = val?.seconds
-        ? new Date(val.seconds * 1000).toLocaleString()
-        : val ?? "";
+      flatRow[col] = dateFieldKeys.includes(col) && val?.seconds
+  ? new Date(val.seconds * 1000).toLocaleDateString("en-GB")
+  : val?.seconds
+    ? new Date(val.seconds * 1000).toLocaleString()
+    : val ?? "";
     });
     return flatRow;
   });
@@ -242,10 +252,10 @@ currentOnly.sort((a, b) => b.indentNumber - a.indentNumber);
 
       if (searchField === "indentNumber") {
         setRecords(currentOnly);
-        setHistory(allVersions);
+        setHistory(allVersions.map(row => JSON.parse(JSON.stringify(row))));
       } else {
         setRecords([]);
-        setHistory(allVersions);
+        setHistory(allVersions.map(row => JSON.parse(JSON.stringify(row))));
       }
 
       if (snapshot.empty || allVersions.length === 0) {
@@ -260,11 +270,22 @@ currentOnly.sort((a, b) => b.indentNumber - a.indentNumber);
   };
 
     const normalize = (val) => {
-    if (val === null || val === undefined) return "";
-    return typeof val === "object" && val.seconds
-      ? new Date(val.seconds * 1000).toISOString()
-      : String(val).trim();
-  };
+  if (!val) return "";
+
+  // Convert Firestore Timestamp → JS Date
+  if (typeof val === "object" && val?.seconds) {
+    return new Date(val.seconds * 1000).toISOString().split("T")[0]; // YYYY-MM-DD
+  }
+
+  // Convert JS Date object
+  if (val instanceof Date) {
+    return val.toISOString().split("T")[0];
+  }
+
+  return String(val).trim();
+};
+
+
 
  const getChangedFields = (current, original) => {
   const ignored = ["versionDate", "expiredAt", "isCurrent", "updateDescription", "createdAt", "createdBy"];
@@ -467,18 +488,45 @@ if (!user) return <Auth />;
 
       <UploadForm />
 
-      <ManualEntryForm
-      onAddRow={(row, addToHistory) => {
-        setRecords([row]);
-        if (addToHistory) setHistory([row]);
 
-        // ✅ Store latest indentNumber to maintain search context
-        setSearchField("indentNumber");
-        setSearchKey(String(row.indentNumber));
-        setSearchAttempted(true);
-        setActiveOnly(false);
-      }}
-    />
+
+    <ManualEntryForm
+  onAddRow={(row, addToHistory) => {
+    // Flatten row so nested fields like customerMaster.x are handled
+    const flattened = flattenObject(row);
+
+    // Normalize all date fields in the flattened version
+    dateFieldKeys.forEach(key => {
+      const val = flattened[key];
+      if (val instanceof Date && !isNaN(val)) {
+        flattened[key] = { seconds: Math.floor(val.getTime() / 1000) };
+      } else if (!val || typeof val !== "object" || !val.seconds) {
+        flattened[key] = null;
+      }
+    });
+
+    // ✅ Store transformed record in all 3 locations
+    const reconstructed = { ...row };
+    dateFieldKeys.forEach(key => {
+      reconstructed[key] = flattened[key]; // Ensure date field consistency
+    });
+
+    setRecords([reconstructed]);
+    if (addToHistory) setHistory([JSON.parse(JSON.stringify(reconstructed))]);
+    setOriginalRecords({ [row.indentNumber]: JSON.parse(JSON.stringify(reconstructed)) });
+
+    setSearchField("indentNumber");
+    setSearchKey(String(row.indentNumber));
+    setSearchAttempted(true);
+    setActiveOnly(false);
+  }}
+/>
+
+
+
+
+
+
 
 
       <hr />
@@ -553,23 +601,39 @@ if (!user) return <Auth />;
                     {finalColumnOrder.map((col, j) => (
                       <td key={j}>
                         <input
-                          type="text"
-                          value={
-                            typeof row[col] === "object" && row[col]?.seconds
-                              ? (col === "date"
-            ? new Date(row[col].seconds * 1000).toLocaleDateString("en-GB")
-            : new Date(row[col].seconds * 1000).toLocaleString()
-          )
-        : String(row[col] ?? "")
-    }
-                          onChange={(e) => {
-                            const updated = [...records];
-                            updated[rowIndex][col] = e.target.value;
-                            setRecords(updated);
-                          }}
-                          readOnly={["indentNumber", "createdAt", "createdBy", "isCurrent", "updateDescription"].includes(col)}
-                          style={{ width: "140px" }}
-                        />
+                        type={dateFieldKeys.includes(col) ? "date" : "text"}
+                        value={
+                          dateFieldKeys.includes(col) && row[col]
+                            ? (() => {
+                                try {
+                                  const d = new Date(row[col]?.seconds * 1000 || row[col]);
+                                  return isNaN(d.getTime())
+                                    ? ""
+                                    : new Date(d.getTime() - d.getTimezoneOffset() * 60000)
+                                        .toISOString()
+                                        .split("T")[0]; // yyyy-mm-dd (used for input)
+                                } catch {
+                                  return "";
+                                }
+                              })()
+                            : row[col] ?? ""
+                        }
+                        onChange={(e) => {
+                          const updated = [...records];
+                          const val = e.target.value;
+                          if (dateFieldKeys.includes(col)) {
+                            updated[rowIndex][col] = val
+                              ? new Date(val)
+                              : "";
+                          } else {
+                            updated[rowIndex][col] = val;
+                          }
+                          setRecords(updated);
+                        }}
+                        readOnly={["indentNumber", "createdAt", "createdBy", "isCurrent", "updateDescription","versionDate", "expiredAt"].includes(col)}
+                        style={{ width: "140px" }}
+                      />
+
                       </td>
                     ))}
                     <td>
@@ -635,11 +699,12 @@ if (!user) return <Auth />;
                   <tr key={i}>
                     {finalColumnOrder.map((col, j) => (
                       <td key={j}>
-                        {typeof row[col] === "object" && row[col]?.seconds
-              ? (col === "date"
-                  ? new Date(row[col].seconds * 1000).toLocaleDateString("en-GB")
-                  : new Date(row[col].seconds * 1000).toLocaleString())
-              : String(row[col] ?? "")}
+                        {dateFieldKeys.includes(col) && row[col]?.seconds
+                          ? new Date(row[col].seconds * 1000).toLocaleDateString("en-GB")
+                          : typeof row[col] === "object" && row[col]?.seconds
+                            ? new Date(row[col].seconds * 1000).toLocaleString()
+                            : String(row[col] ?? "")}
+
                       </td>
                     ))}
                   </tr>
