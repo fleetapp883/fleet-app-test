@@ -22,17 +22,58 @@ import * as XLSX from "xlsx";
 import { confirmAlert } from 'react-confirm-alert';
 import 'react-confirm-alert/src/react-confirm-alert.css';
 
+
+
+
+// Fetch all serialNumbers for given indentNumber
+const fetchSerialNumbersForIndent = async (indentNumber) => {
+  const fleetRef = collection(db, "fleet_records");
+  const q = query(fleetRef, where("indentNumber", "==", indentNumber), where("isCurrent", "==", true));
+  const snapshot = await getDocs(q);
+  const serialNumbers = [];
+  snapshot.forEach(doc => {
+    const data = doc.data();
+    if (data.serialNumber) serialNumbers.push(data.serialNumber);
+  });
+  return serialNumbers;
+};
+
+// Increment suffix helper
+const incrementSuffix = (suffix) => {
+  if (!suffix) return "A";
+  const lastChar = suffix.slice(-1);
+  if (lastChar === "Z") return suffix + "A";
+  return suffix.slice(0, -1) + String.fromCharCode(lastChar.charCodeAt(0) + 1);
+};
+
+// Compute next serial number for indent
+const computeNextSerial = (existingSerials) => {
+  if (!existingSerials || existingSerials.length === 0) return "1";
+
+  const parentSerial = "1";
+  const childrenSerials = existingSerials.filter(s => s.startsWith(parentSerial) && s !== parentSerial);
+
+  if (childrenSerials.length === 0) return "1A";
+
+  const suffixes = childrenSerials.map(s => s.substring(parentSerial.length));
+  suffixes.sort();
+  const maxSuffix = suffixes[suffixes.length - 1];
+
+  return parentSerial + incrementSuffix(maxSuffix);
+};
+
+
 const dateFieldKeys = [
-  "date", "deliveryDate","createdAt", "versionDate", "expiredAt", "customerMaster.advanceRecDate", "customerMaster.balanceRecDate",
+  "date", "gateOutDate","deliveryDate","createdAt", "versionDate", "expiredAt", "customerMaster.advanceRecDate", "customerMaster.balanceRecDate",
   "customerMaster.advDeviation", "customerMaster.validatedAdvanceUTRDescription",
   "customerMaster.validatedAdvanceAmount", "customerMaster.validatedBalanceUTR",
   "customerMaster.validatedBalanceUTRAmount",
-  "podMaster.podVendorDate", "podMaster.podSendToCustomerDate", "podMaster.podCustomerRec", "podMaster.today"
+  "podMaster.reportingDateDestination","podMaster.offloadingDateDestination","podMaster.podVendorDate", "podMaster.podSendToCustomerDate", "podMaster.podCustomerRec", "podMaster.today"
 ];
 
 
 const finalColumnOrder = [
-  "indentNumber", "date","deliveryDate", "months", "origin", "destination", "customer", "customerType",
+  "indentNumber","serialNumber", "date","gateOutDate","deliveryDate", "months", "origin", "destination", "customer", "customerType",
   "vehicleNo", "vendor", "salesRate", "buyRate", "createdAt", "createdBy", "versionDate",
   "isCurrent", "updateDescription", "expiredAt",
   // Customer Master
@@ -46,14 +87,18 @@ const finalColumnOrder = [
   "vendorMaster.vendorOutwardPayment", "vendorMaster.paidAmount", "vendorMaster.balancePending",
   "vendorMaster.vendorRemark",
   // POD Master
-  "podMaster.podVendorDate", "podMaster.podSendToCustomerDate", "podMaster.docNo",
+  "podMaster.reportingDateDestination","podMaster.offloadingDateDestination","podMaster.podVendorDate", "podMaster.podSendToCustomerDate", "podMaster.docNo",
   "podMaster.podCustomerRec", "podMaster.today", "podMaster.balanceOverdueDays",
   "podMaster.toBeCollectedAmount"
 ];
 
 const columnLabels = {
   indentNumber: "Indent Number",
+  serialNumber: "Serial Number",
   date: "Placement Date",
+  gateOutDate: "Gate Out Date",
+  "podMaster.reportingDateDestination": "Reporting Date (Destination)",
+  "podMaster.offloadingDateDestination": "Offloading Date (Destination)",
   deliveryDate: "Delivery Date",
   months: "Month",
   origin: "Origin",
@@ -137,6 +182,11 @@ function App() {
   const [includeCustomer, setIncludeCustomer] = useState(false);
   const [includeVendor, setIncludeVendor] = useState(false);
   const [includePOD, setIncludePOD] = useState(false);
+  const [showAddChildModal, setShowAddChildModal] = useState(false);
+  const [currentIndentForChild, setCurrentIndentForChild] = useState(null);
+  const [addingChild, setAddingChild] = useState(false);
+  const [newChildData, setNewChildData] = useState(null);
+
 
 
 
@@ -215,7 +265,7 @@ function App() {
   );
 }
  else if (searchKey) {
-  const key = searchField === "indentNumber" ? Number(searchKey) : searchKey;
+  const key = searchKey.trim();
   q = query(
     fleetRef,
     where(searchField, "==", key),
@@ -596,6 +646,58 @@ if (!user) return <Auth />;
                 </tr>
               </thead>
               <tbody>
+                {addingChild && newChildData && (
+  <tr key="new-child" className="new-child-row">
+    {finalColumnOrder.map((col, i) => (
+      <td key={i}>
+        <input
+          type={dateFieldKeys.includes(col) ? "date" : "text"}
+          value={newChildData[col] ?? ""}
+          onChange={(e) => setNewChildData((prev) => ({ ...prev, [col]: e.target.value }))}
+          readOnly={col === "indentNumber" || col === "serialNumber"}
+          style={{ width: "140px" }}
+        />
+      </td>
+    ))}
+    <td>
+      <button
+        className="save"
+        onClick={async () => {
+          try {
+            const user = auth.currentUser;
+            const dataToSave = {
+              ...newChildData,
+              createdAt: new Date(),
+              createdBy: user?.email || "anonymous",
+              isCurrent: true,
+              versionDate: new Date(),
+            };
+            await addDoc(collection(db, "fleet_records"), dataToSave);
+            setAddingChild(false);
+            setNewChildData(null);
+            await handleSearch(); // Refresh to show the child
+            toast.success("✅ Child record added.");
+          } catch (error) {
+            toast.error("❌ Failed to add child: " + error.message);
+          }
+        }}
+      >
+        Save
+      </button>
+      <button
+        className="cancel"
+        style={{ marginLeft: 6, color: "red" }}
+        onClick={() => {
+          setAddingChild(false);
+          setNewChildData(null);
+        }}
+      >
+        Cancel
+      </button>
+    </td>
+  </tr>
+)}
+
                 {records.map((row, rowIndex) => (
                   <tr key={rowIndex}>
                     {finalColumnOrder.map((col, j) => (
@@ -658,23 +760,51 @@ if (!user) return <Auth />;
           <hr />
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
   <h4>🔍 Full Version History</h4>
-  <div style={{ display: "flex", gap: "20px", alignItems: "center" }}>
-  <label>
-    <input type="checkbox" checked={includeCustomer} onChange={(e) => setIncludeCustomer(e.target.checked)} />
-    Include Customer
-  </label>
-  <label>
-    <input type="checkbox" checked={includeVendor} onChange={(e) => setIncludeVendor(e.target.checked)} />
-    Include Vendor
-  </label>
-  <label>
-    <input type="checkbox" checked={includePOD} onChange={(e) => setIncludePOD(e.target.checked)} />
-    Include POD
-  </label>
-  <button onClick={handleExportToExcel} disabled={history.length === 0} className="export-button">
-    ⬇️ Export Selected
+  
+  <div style={{ display: "flex", gap: "20px", alignItems: "center", justifyContent: "space-between" }}>
+  
+  <button
+    className="btn btn-primary"
+    disabled={!searchKey || !records.length}
+    onClick={async () => {
+  if (!searchKey) {
+    toast.warn("❗ Please search an indent number first.");
+    return;
+  }
+  const indent = searchKey.trim();
+  const existingSerials = await fetchSerialNumbersForIndent(indent);
+  const nextSerial = computeNextSerial(existingSerials);
+
+  setNewChildData({
+    indentNumber: indent,
+    serialNumber: nextSerial,
+    // Initialize other fields as empty strings or defaults if desired
+  });
+  setAddingChild(true);
+}}
+  >
+    ➕ Add Child
   </button>
+
+  <div style={{ display: "flex", gap: "20px", alignItems: "center" }}>
+    <label>
+      <input type="checkbox" checked={includeCustomer} onChange={(e) => setIncludeCustomer(e.target.checked)} />
+      Include Customer
+    </label>
+    <label>
+      <input type="checkbox" checked={includeVendor} onChange={(e) => setIncludeVendor(e.target.checked)} />
+      Include Vendor
+    </label>
+    <label>
+      <input type="checkbox" checked={includePOD} onChange={(e) => setIncludePOD(e.target.checked)} />
+      Include POD
+    </label>
+    <button onClick={handleExportToExcel} disabled={history.length === 0} className="export-button">
+      ⬇️ Export Selected
+    </button>
+  </div>
 </div>
+
 
 </div>
         <div className="table-scroll-x">

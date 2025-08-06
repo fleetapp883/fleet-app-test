@@ -19,6 +19,7 @@ import { confirmAlert } from 'react-confirm-alert';
 
 const fixedFieldsInitial = {
   date: "",
+  gateOutDate: "",
   deliveryDate: "",
   months: "",
   origin: "",
@@ -57,6 +58,8 @@ const vendorFields = {
 };
 
 const podFields = {
+  reportingDateDestination: "",
+  offloadingDateDestination: "",
   podVendorDate: "",
   podSendToCustomerDate: "",
   docNo: "",
@@ -116,6 +119,9 @@ const ManualEntryForm = ({ onAddRow }) => {
 
   const formatLabel = (key) => {
   if (key === "date") return "Placement Date";
+  if (key === "gateOutDate") return "Gate Out Date";
+  if (key === "reportingDateDestination") return "Reporting Date (Destination)";
+  if (key === "offloadingDateDestination") return "Offloading Date (Destination)";
   return key
     .replace(/([a-z])([A-Z])/g, "$1 $2")
     .replace(/_/g, " ")
@@ -220,8 +226,9 @@ if (!hasAnyValue) {
       const user = auth.currentUser;
       const indentNo  = await getNextIndentNumber();
       const enrichedData = {
-        indentNumber: indentNo,
-        ...convertDateFields(fixedFields, ["date","deliveryDate"]),
+        indentNumber: String(indentNo),
+        serialNumber: "1", 
+        ...convertDateFields(fixedFields, ["date","gateOutDate","deliveryDate"]),
         createdAt: new Date(),
         createdBy: user?.email || "anonymous",
         isCurrent: true,
@@ -306,7 +313,7 @@ if (!hasAnyValue) {
     await saveSection("vendorMaster", vendorData);
   }
   if (showPod && !podSaved) {
-    await saveSection("podMaster", podData, ["podVendorDate", "podSendToCustomerDate", "podCustomerRec", "today"]);
+    await saveSection("podMaster", podData, ["reportingDestinationDate", "offloadingDateDestination","podVendorDate", "podSendToCustomerDate", "podCustomerRec", "today"]);
   }
 
   const docSnap = await getDoc(doc(db, "fleet_records", docId));
@@ -398,45 +405,36 @@ const handleNewRecord = () => {
       gap: "16px",
     }}
   >
-    {Object.keys(fixedFieldsInitial).map((key) => {
-      const isDate = key.toLowerCase().includes("date");
-      const label =
-        isDate
-          ? `${key} (dd/mm/yyyy)`
-          : key === "months"
-          ? "months (e.g. Jul-2025)"
-          : key;
-
-      return (
-        <div key={key}>
-          <label className="form-label" style={{ fontWeight: "500" }}>
-  {formatLabel(key)}
-</label>
-{(key === "date" || key === "deliveryDate") ? (
-  <input
-    type="date"
-    name={key}
-    className="form-control"
-    value={fixedFields[key]}
-    onChange={handleFixedChange}
-    disabled={!!indentNumber}
-  />
-) : (
-  <input
-    name={key}
-    className="form-control"
-    placeholder=""
-    value={fixedFields[key]}
-    onChange={handleFixedChange}
-    disabled={!!indentNumber}
-    type="text"
-  />
-)}
-
-
-        </div>
-      );
-    })}
+{Object.keys(fixedFieldsInitial).map((key) => {
+  const isDate = key.toLowerCase().includes("date");
+  return (
+    <div key={key}>
+      <label className="form-label" style={{ fontWeight: "500" }}>
+        {formatLabel(key)}
+      </label>
+      {isDate ? (
+        <input
+          type="date"
+          name={key}
+          className="form-control"
+          value={fixedFields[key]}
+          onChange={handleFixedChange}
+          disabled={!!indentNumber}
+        />
+      ) : (
+        <input
+          name={key}
+          className="form-control"
+          placeholder=""
+          value={fixedFields[key]}
+          onChange={handleFixedChange}
+          disabled={!!indentNumber}
+          type="text"
+        />
+      )}
+    </div>
+  );
+})}
   </div>
 
   {!indentNumber && (
@@ -571,7 +569,7 @@ const handleNewRecord = () => {
         }}
       >
         {Object.keys(podFields).map((key) => {
-          const isDate = ["podVendorDate", "podSendToCustomerDate", "podCustomerRec", "today"].includes(key);
+          const isDate = ["podVendorDate", "podSendToCustomerDate", "podCustomerRec", "today","reportingDateDestination", "offloadingDateDestination"].includes(key);
           const label = isDate ? `${key} (dd/mm/yyyy)` : key;
           return (
             <div key={key}>

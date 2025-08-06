@@ -1,7 +1,76 @@
 import React, { useState } from "react";
-import { addDoc, collection, doc, runTransaction } from "firebase/firestore";
 import * as XLSX from "xlsx";
 import { db, auth } from "../firebase";
+import { 
+  addDoc, 
+  collection, 
+  doc, 
+  runTransaction, 
+  query, 
+  where, 
+  getDocs 
+} from "firebase/firestore";
+
+
+// Helper to increment alphabet suffix e.g. "A" -> "B"
+const incrementSuffix = (suffix) => {
+  if (!suffix) return "A";
+  const lastChar = suffix.slice(-1);
+  if (lastChar === "Z") {
+    // For simplicity, if Z reached, just append A again (or enhance this logic as needed)
+    return suffix + "A";
+  }
+  return suffix.slice(0, -1) + String.fromCharCode(lastChar.charCodeAt(0) + 1);
+};
+
+// Compute next serial number given an array of existing serials for the indent
+const computeNextSerial = (existingSerials) => {
+  if (!existingSerials || existingSerials.length === 0) {
+    // No serial numbers yet for this indent, start with "1"
+    return "1";
+  }
+
+  // Filter only those starting with "1"
+  // The main parent serial is "1", then children "1A", "1B", etc.
+  const parentSerial = "1";
+  const childrenSerials = existingSerials.filter(s => s.startsWith(parentSerial) && s !== parentSerial);
+
+  if (childrenSerials.length === 0) {
+    // No children yet, so start with "1A"
+    return "1A";
+  }
+
+  // Extract suffix letters after "1"
+  const suffixes = childrenSerials.map(s => s.substring(parentSerial.length));
+
+  // Find the max suffix alphabetically
+  suffixes.sort();
+
+  const maxSuffix = suffixes[suffixes.length - 1];
+
+  // Compute next suffix
+  const nextSuffix = incrementSuffix(maxSuffix);
+
+  return parentSerial + nextSuffix;
+};
+
+const fetchSerialNumbersForIndent = async (indentNumber) => {
+  const fleetRef = collection(db, "fleet_records");
+  const q = query(
+    fleetRef,
+    where("indentNumber", "==", indentNumber),
+    where("isCurrent", "==", true)
+  );
+  const snapshot = await getDocs(q);
+  const serialNumbers = [];
+  snapshot.forEach((doc) => {
+    const data = doc.data();
+    if (data.serialNumber) {
+      serialNumbers.push(data.serialNumber);
+    }
+  });
+  return serialNumbers;
+};
 
 const dateFieldKeys = [
   "placementDate",
@@ -11,12 +80,16 @@ const dateFieldKeys = [
   "podMaster.podVendorDate",
   "podMaster.podSendToCustomerDate",
   "podMaster.podCustomerRec",
-  "podMaster.today"
+  "podMaster.today",
+  "gateOutDate",
+  "podMaster.reportingDateDestination",
+  "podMaster.offloadingDateDestination"
 ];
 
 
 const labelToKey = {
   "Placement Date": "placementDate",
+  "Gate Out Date": "gateOutDate",
   "Delivery Date": "deliveryDate",
   "Month": "months",
   "Origin": "origin",
@@ -49,6 +122,8 @@ const labelToKey = {
   "Vendor -> Balance Pending": "vendorMaster.balancePending",
   "Vendor -> Vendor Remark": "vendorMaster.vendorRemark",
   // POD Master
+    "Reporting Date (Destination)": "podMaster.reportingDateDestination",
+  "Offloading Date (Destination)": "podMaster.offloadingDateDestination",
   "POD -> POD Vendor-Date": "podMaster.podVendorDate",
   "POD -> POD-Send to Customer Date": "podMaster.podSendToCustomerDate",
   "POD -> Doc No": "podMaster.docNo",
@@ -64,20 +139,32 @@ const UploadForm = () => {
   const [fleetNumbers, setFleetNumbers] = useState({});
 
   const generateTemplate = () => {
-  const headers = Object.keys(labelToKey);
+  const headers = [...Object.keys(labelToKey)];
+  headers.unshift("Indent No.");  // existing indent number column
+  headers.unshift("S.No.");       // new serial number column, added at the beginning
+
   const sampleRow = {};
   headers.forEach(header => {
+    if (header === "S.No.") {
+      sampleRow[header] = "1";   // sample value for serial number
+      return;
+    }
+    if (header === "Indent No.") {
+      sampleRow[header] = "Feb/25/01";  // sample indent number
+      return;
+    }
+
     const key = labelToKey[header];
     if (dateFieldKeys.includes(key)) {
-      sampleRow[header] = "01-01-2025"; // DD-MM-YYYY
+      sampleRow[header] = "01-01-2025";  // sample date value
     } else if (header.toLowerCase() === "month" || header.toLowerCase().includes("month")) {
-      sampleRow[header] = "July-2025"; // Month format
+      sampleRow[header] = "July-2025";  // sample month format
     } else if (header.toLowerCase().includes("rate") || header.toLowerCase().includes("amount")) {
-      sampleRow[header] = "10000";
+      sampleRow[header] = "10000";  // sample numeric value
     } else if (header.toLowerCase().includes("number") || header.toLowerCase().includes("no")) {
-      sampleRow[header] = "ABC123";
+      sampleRow[header] = "ABC123";  // sample text for numbers/IDs
     } else {
-      sampleRow[header] = "Sample";
+      sampleRow[header] = "Sample";  // default sample text
     }
   });
 
@@ -88,7 +175,14 @@ const UploadForm = () => {
 };
 
 
-  const getMappedKey = (label) => labelToKey[label.trim()] || null;
+
+
+  const getMappedKey = (label) => {
+  if (label.trim() === "Indent No.") return "indentNumber";
+  if (label.trim() === "S.No.") return "serialNumber";
+  return labelToKey[label.trim()] || null;
+};
+
 
   const parseExcel = (file) => {
     const reader = new FileReader();
@@ -135,8 +229,23 @@ const UploadForm = () => {
   const saveRow = async (row, i) => {
   const user = auth.currentUser;
   try {
-    const fleetNo = await getNextFleetNumber(); // This is your indentNumber now
+    let indentNumber = row.indentNumber;
+  if (!indentNumber || indentNumber === "") {
+    indentNumber = await getNextFleetNumber();
+  }
 
+  let serialNumber = row.serialNumber;
+if (!serialNumber || serialNumber.trim() === "") {
+  // Fetch existing serial numbers under this indentNumber
+  const existingSerials = await fetchSerialNumbersForIndent(indentNumber);
+  // Compute the next serial number based on existing serial numbers:
+  serialNumber = computeNextSerial(existingSerials);  // implement this function separately
+}
+serialNumber = String(serialNumber);
+
+
+
+  indentNumber = String(indentNumber);
     const parsedRow = { ...row };
     Object.keys(parsedRow).forEach((key) => {
       if (typeof parsedRow[key] === "string" && parsedRow[key].match(/^\d{2}-\d{2}-\d{4}$/)) {
@@ -151,7 +260,8 @@ const UploadForm = () => {
 }
     const enriched = {
       ...parsedRow,
-      indentNumber: fleetNo, // ✅ THIS FIXES IT
+      indentNumber: indentNumber,
+      serialNumber: serialNumber,    
       createdAt: new Date(),
       createdBy: user?.email || "anonymous",
       isCurrent: true,
@@ -160,7 +270,7 @@ const UploadForm = () => {
 
     await addDoc(collection(db, "fleet_records"), enriched);
     setStatusMap((prev) => ({ ...prev, [i]: "✅ Saved" }));
-    setFleetNumbers((prev) => ({ ...prev, [i]: fleetNo }));
+    setFleetNumbers((prev) => ({ ...prev, [i]: indentNumber }));
   } catch (err) {
     setStatusMap((prev) => ({ ...prev, [i]: "❌ Failed" }));
   }
