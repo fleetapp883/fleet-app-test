@@ -64,12 +64,22 @@ const computeNextSerial = (existingSerials) => {
 
 
 const dateFieldKeys = [
-  "date", "gateOutDate","deliveryDate","createdAt", "versionDate", "expiredAt", "customerMaster.advanceRecDate", "customerMaster.balanceRecDate",
-  "customerMaster.advDeviation", "customerMaster.validatedAdvanceUTRDescription",
-  "customerMaster.validatedAdvanceAmount", "customerMaster.validatedBalanceUTR",
-  "customerMaster.validatedBalanceUTRAmount",
-  "podMaster.reportingDateDestination","podMaster.offloadingDateDestination","podMaster.podVendorDate", "podMaster.podSendToCustomerDate", "podMaster.podCustomerRec", "podMaster.today"
+  "date", 
+  "gateOutDate",
+  "deliveryDate",
+  "createdAt",
+  "versionDate",
+  "expiredAt",
+  "customerMaster.advanceRecDate",       // date
+  "customerMaster.balanceRecDate",       // date
+  "podMaster.reportingDateDestination",
+  "podMaster.offloadingDateDestination",
+  "podMaster.podVendorDate",
+  "podMaster.podSendToCustomerDate",
+  "podMaster.podCustomerRec",
+  "podMaster.today"
 ];
+
 
 
 const finalColumnOrder = [
@@ -148,6 +158,15 @@ const columnLabels = {
   "podMaster.balanceOverdueDays": "POD Master -> Balance Overdue Days",
   "podMaster.toBeCollectedAmount": "POD Master -> To be Collected Amount"
 };
+
+// Ensure every field in finalColumnOrder exists on the row object (flattened)
+function normalizeRowShape(flatRow, columnList = finalColumnOrder) {
+  const filled = {};
+  for (const col of columnList) {
+    filled[col] = flatRow[col] !== undefined ? flatRow[col] : ""; // or null, if you prefer
+  }
+  return filled;
+}
 
 
 const flattenObject = (obj, prefix = "") => {
@@ -240,100 +259,158 @@ function App() {
   XLSX.writeFile(workbook, fileName);
 };
 
+const performDirectSearch = async (searchIndentNumber) => {
+  
+  setIsSearching(true);
+  
+  try {
+    const fleetRef = collection(db, "fleet_records");
+    const q = query(
+      fleetRef,
+      where("indentNumber", "==", searchIndentNumber),
+      where("isCurrent", "==", true)
+    );
 
-  const handleSearch = async () => {
-    setIsSearching(true);
-    try {
-      const fleetRef = collection(db, "fleet_records");
-      let q;
+    setSearchAttempted(true);
+    const snapshot = await getDocs(q);
+    const allVersions = [];
+    const currentOnly = [];
 
-          if (searchField === "Date") {
-  const fromDate = new Date(startDate);
-  const toDate = new Date(endDate + "T23:59:59");
+    snapshot.forEach((docSnap) => {
+      const rawData = { id: docSnap.id, ...docSnap.data() };
+      const row = flattenObject(rawData);
+      
 
-  if (fromDate > toDate) {
-    toast.warn("⚠️ 'From' date cannot be after 'To' date.");
+      allVersions.push(row);
+      if (row.isCurrent) currentOnly.push(row);
+    });
+
+    allVersions.sort((a, b) => {
+      if (a.isCurrent && !b.isCurrent) return -1;
+      if (!a.isCurrent && b.isCurrent) return 1;
+      return b.indentNumber - a.indentNumber;
+    });
+
+    currentOnly.sort((a, b) => b.indentNumber - a.indentNumber);
+
+    setRecords(currentOnly);
+    setHistory(allVersions.map(row => JSON.parse(JSON.stringify(row))));
+    
+    // Set originalRecords for editing
+    const originalData = {};
+    currentOnly.forEach(record => {
+      originalData[record.indentNumber] = JSON.parse(JSON.stringify(record));
+    });
+    setOriginalRecords(originalData);
+
+   
+
+    if (snapshot.empty || allVersions.length === 0) {
+      toast.info("❌ No records found.");
+    }
+  } catch (error) {
+    
+    toast.error("❌ Search failed: " + error.message);
+  } finally {
     setIsSearching(false);
-    return;
   }
+};
 
-  q = query(
-    fleetRef,
-    ...(activeOnly ? [where("isCurrent", "==", true)] : []),
-    where("createdAt", ">=", fromDate),
-    where("createdAt", "<=", toDate)
-  );
-}
- else if (searchKey) {
-  const key = searchKey.trim();
-  q = query(
-    fleetRef,
-    where(searchField, "==", key),
-    ...(activeOnly ? [where("isCurrent", "==", true)] : [])
-  );
-}
 
- else {
-        toast.warn("🔍 Please enter a search value.");
+
+const handleSearch = async () => {
+  setIsSearching(true);
+  try {
+    const fleetRef = collection(db, "fleet_records");
+    let q;
+
+    if (searchField === "Date") {
+      const fromDate = new Date(startDate);
+      const toDate = new Date(endDate + "T23:59:59");
+
+      if (fromDate > toDate) {
+        toast.warn("⚠️ 'From' date cannot be after 'To' date.");
         setIsSearching(false);
         return;
       }
 
-      setSearchAttempted(true);
-      const snapshot = await getDocs(q);
-      const allVersions = [];
-      const currentOnly = [];
-
-      snapshot.forEach((docSnap) => {
-        const rawData = { id: docSnap.id, ...docSnap.data() };
-        const row = flattenObject(rawData);
-
-        allVersions.push(row);
-        if (row.isCurrent) currentOnly.push(row);
-      });
-      allVersions.sort((a, b) => {
-  if (a.isCurrent && !b.isCurrent) return -1;
-  if (!a.isCurrent && b.isCurrent) return 1;
-  return b.indentNumber - a.indentNumber;
-});
-
-// ✅ Sort currentOnly also by indentNumber descending
-currentOnly.sort((a, b) => b.indentNumber - a.indentNumber);
-
-      if (searchField === "indentNumber") {
-        setRecords(currentOnly);
-        setHistory(allVersions.map(row => JSON.parse(JSON.stringify(row))));
-      } else {
-        setRecords([]);
-        setHistory(allVersions.map(row => JSON.parse(JSON.stringify(row))));
-      }
-
-      if (snapshot.empty || allVersions.length === 0) {
-        toast.info("❌ No records found.");
-      }
-    } catch (error) {
-  toast.error("❌ Search failed: " + error.message);
-
-    } finally {
+      q = query(
+        fleetRef,
+        ...(activeOnly ? [where("isCurrent", "==", true)] : []),
+        where("createdAt", ">=", fromDate),
+        where("createdAt", "<=", toDate)
+      );
+    } else if (searchKey) {
+      const key = searchKey.trim();
+      q = query(
+        fleetRef,
+        where(searchField, "==", key),
+        ...(activeOnly ? [where("isCurrent", "==", true)] : [])
+      );
+    } else {
+      toast.warn("🔍 Please enter a search value.");
       setIsSearching(false);
+      return;
     }
-  };
 
-    const normalize = (val) => {
+    setSearchAttempted(true);
+    const snapshot = await getDocs(q);
+    const allVersions = [];
+    const currentOnly = [];
+
+    snapshot.forEach((docSnap) => {
+      const rawData = { id: docSnap.id, ...docSnap.data() };
+      const row = flattenObject(rawData);
+    
+
+      allVersions.push(row);
+      if (row.isCurrent) currentOnly.push(row);
+    });
+
+    allVersions.sort((a, b) => {
+      if (a.isCurrent && !b.isCurrent) return -1;
+      if (!a.isCurrent && b.isCurrent) return 1;
+      return b.indentNumber - a.indentNumber;
+    });
+
+    currentOnly.sort((a, b) => b.indentNumber - a.indentNumber);
+
+    if (searchField === "indentNumber") {
+      setRecords(currentOnly);
+      setHistory(allVersions.map(row => JSON.parse(JSON.stringify(row))));
+    } else {
+      // Show current filtered records also in editable table to keep data consistent
+      setRecords(currentOnly);
+      setHistory(allVersions.map(row => JSON.parse(JSON.stringify(row))));
+    }
+
+    if (snapshot.empty || allVersions.length === 0) {
+      toast.info("❌ No records found.");
+    }
+  } catch (error) {
+    toast.error("❌ Search failed: " + error.message);
+  } finally {
+    setIsSearching(false);
+  }
+};
+
+const normalize = (val) => {
   if (!val) return "";
 
-  // Convert Firestore Timestamp → JS Date
+  // Convert Firestore Timestamp → JS Date string (YYYY-MM-DD)
   if (typeof val === "object" && val?.seconds) {
-    return new Date(val.seconds * 1000).toISOString().split("T")[0]; // YYYY-MM-DD
+    return new Date(val.seconds * 1000).toISOString().split("T")[0];
   }
 
-  // Convert JS Date object
+  // Convert JS Date object → string (YYYY-MM-DD)
   if (val instanceof Date) {
     return val.toISOString().split("T")[0];
   }
 
+  // Otherwise, just trim and return string
   return String(val).trim();
 };
+
 
 
 
@@ -540,37 +617,38 @@ if (!user) return <Auth />;
 
 
 
-    <ManualEntryForm
+    
+  <ManualEntryForm
   onAddRow={(row, addToHistory) => {
-    // Flatten row so nested fields like customerMaster.x are handled
-    const flattened = flattenObject(row);
-
-    // Normalize all date fields in the flattened version
-    dateFieldKeys.forEach(key => {
-      const val = flattened[key];
-      if (val instanceof Date && !isNaN(val)) {
-        flattened[key] = { seconds: Math.floor(val.getTime() / 1000) };
-      } else if (!val || typeof val !== "object" || !val.seconds) {
-        flattened[key] = null;
-      }
-    });
-
-    // ✅ Store transformed record in all 3 locations
-    const reconstructed = { ...row };
-    dateFieldKeys.forEach(key => {
-      reconstructed[key] = flattened[key]; // Ensure date field consistency
-    });
-
-    setRecords([reconstructed]);
-    if (addToHistory) setHistory([JSON.parse(JSON.stringify(reconstructed))]);
-    setOriginalRecords({ [row.indentNumber]: JSON.parse(JSON.stringify(reconstructed)) });
-
+   
+    
+    toast.success("✅ Entry saved successfully!");
+    
+    const currentIndentNumber = String(row.indentNumber);
+  
+    
+    // Set up search parameters for UI
     setSearchField("indentNumber");
-    setSearchKey(String(row.indentNumber));
+    setSearchKey(currentIndentNumber);
     setSearchAttempted(true);
     setActiveOnly(false);
+    
+  
+    
+    // ✅ FIX: Direct search with parameters instead of relying on state
+    setTimeout(() => {
+    
+      performDirectSearch(currentIndentNumber);
+    }, 3000); // Back to 3 seconds - timing wasn't the issue
   }}
 />
+
+
+
+
+
+
+
 
 
 

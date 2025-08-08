@@ -226,55 +226,93 @@ const UploadForm = () => {
 
 
 
-  const saveRow = async (row, i) => {
+// Utility to convert flat dotted keys into nested objects
+function unflattenObject(data) {
+  const result = {};
+  Object.entries(data).forEach(([key, value]) => {
+    const keys = key.split('.');
+    keys.reduce((acc, k, idx) => {
+      if (idx === keys.length - 1) {
+        acc[k] = value;
+      } else {
+        if (!acc[k] || typeof acc[k] !== 'object') acc[k] = {};
+        return acc[k];
+      }
+    }, result);
+  });
+  return result;
+}
+
+// Recursive function to parse date strings inside objects
+function recursivelyParseDates(obj) {
+  if (typeof obj !== 'object' || obj === null) return obj;
+  Object.keys(obj).forEach((key) => {
+    const val = obj[key];
+    if (typeof val === 'string' && val.match(/^\d{2}-\d{2}-\d{4}$/)) {
+      const parsed = parseDDMMYYYY(val);
+      if (parsed instanceof Date && !isNaN(parsed)) {
+        obj[key] = parsed;
+      }
+    } else if (typeof val === 'object' && val !== null) {
+      recursivelyParseDates(val);
+    }
+  });
+  return obj;
+}
+
+const saveRow = async (row, i) => {
   const user = auth.currentUser;
   try {
     let indentNumber = row.indentNumber;
-  if (!indentNumber || indentNumber === "") {
-    indentNumber = await getNextFleetNumber();
-  }
+    if (!indentNumber || indentNumber === "") {
+      indentNumber = await getNextFleetNumber();
+    }
 
-  let serialNumber = row.serialNumber;
-if (!serialNumber || serialNumber.trim() === "") {
-  // Fetch existing serial numbers under this indentNumber
-  const existingSerials = await fetchSerialNumbersForIndent(indentNumber);
-  // Compute the next serial number based on existing serial numbers:
-  serialNumber = computeNextSerial(existingSerials);  // implement this function separately
-}
-serialNumber = String(serialNumber);
+    let serialNumber = row.serialNumber;
+    if (!serialNumber || serialNumber.trim() === "") {
+      const existingSerials = await fetchSerialNumbersForIndent(indentNumber);
+      serialNumber = computeNextSerial(existingSerials);
+    }
+    serialNumber = String(serialNumber);
+    indentNumber = String(indentNumber);
 
-
-
-  indentNumber = String(indentNumber);
+    // Step 1: Copy flat row data
     const parsedRow = { ...row };
-    Object.keys(parsedRow).forEach((key) => {
-      if (typeof parsedRow[key] === "string" && parsedRow[key].match(/^\d{2}-\d{2}-\d{4}$/)) {
-        const parsedDate = parseDDMMYYYY(parsedRow[key]);
-        if (parsedDate instanceof Date && !isNaN(parsedDate)) {
-          parsedRow[key] = parsedDate;
-        }
-      }
-    });
-    if (parsedRow.placementDate && !parsedRow.date) {
-  parsedRow.date = parsedRow.placementDate;
-}
+
+    // Step 2: Convert flat dotted keys to nested objects
+    const nestedRow = unflattenObject(parsedRow);
+
+    // Step 3: Recursively parse date strings inside the nested object
+    recursivelyParseDates(nestedRow);
+
+    // Step 4: (Optional) Set 'date' field if missing, from placementDate
+    if (nestedRow.placementDate && !nestedRow.date) {
+      nestedRow.date = nestedRow.placementDate;
+    }
+
+    // Step 5: Enrich data to save to Firestore
     const enriched = {
-      ...parsedRow,
+      ...nestedRow,
       indentNumber: indentNumber,
-      serialNumber: serialNumber,    
+      serialNumber: serialNumber,
       createdAt: new Date(),
       createdBy: user?.email || "anonymous",
       isCurrent: true,
       versionDate: new Date(),
     };
 
+    // Step 6: Save to Firestore
     await addDoc(collection(db, "fleet_records"), enriched);
+
+    // Step 7: Update UI status
     setStatusMap((prev) => ({ ...prev, [i]: "✅ Saved" }));
     setFleetNumbers((prev) => ({ ...prev, [i]: indentNumber }));
+
   } catch (err) {
     setStatusMap((prev) => ({ ...prev, [i]: "❌ Failed" }));
   }
 };
+
 
 
 
@@ -285,10 +323,15 @@ serialNumber = String(serialNumber);
   };
 
   const handleEdit = (i, key, value) => {
-    const updated = [...previewData];
+  const updated = [...previewData];
+  if (dateFieldKeys.includes(key) && typeof value === "string" && value.length === 10) {
+    updated[i][key] = new Date(value);
+  } else {
     updated[i][key] = value;
-    setPreviewData(updated);
-  };
+  }
+  setPreviewData(updated);
+};
+
 
   const deleteRow = (i) => {
     setPreviewData(previewData.filter((_, idx) => idx !== i));
